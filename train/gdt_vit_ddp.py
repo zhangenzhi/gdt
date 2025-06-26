@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append("./")
+    
 import torch
 from torch import nn
 import torch.utils.data as data  # For custom dataset (optional)
@@ -155,8 +158,6 @@ def gdt_imagenet_train_local(args):
     
 if __name__ == "__main__":
     import argparse
-    import sys
-    sys.path.append("./")
     import pdb;pdb.set_trace()
     
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
