@@ -10,7 +10,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import logging
 
 # from model.vit import create_vit_model
-from dataset.imagenet import imagenet_distribute
+from dataset.imagenet import imagenet_distribute, imagenet_subset
 from model.gdt_vit import create_gdt_cls
 
 # Configure logging
@@ -127,3 +127,46 @@ def gdt_vit_ddp(args):
     log(args=args)
     args.world_size = int(os.environ['SLURM_NTASKS'])
     gdt_imagenet_train(args=args)
+
+
+def gdt_imagenet_train_local(args):
+
+    device_id = 0
+    # Create DataLoader for training and validation
+    dataloaders = imagenet_subset(args=args)
+
+    # Create ViT model
+    IMG_SIZE = args.img_size
+    stages_config = [
+        {"depth": 4, "patch_size_in": 32, "patch_size_out": 16, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
+        {"depth": 4, "patch_size_in": 16, "patch_size_out": 8, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
+        {"depth": 4, "patch_size_in": 8, "patch_size_out": 4, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
+        {"depth": 4, "patch_size_in": 4, "patch_size_out": 2, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
+    ]
+    model = create_gdt_cls(img_size=IMG_SIZE, stages_config=stages_config, target_leaf_size=16, encoder_embed_dim=786, classifier_embed_dim=786, num_classes=1000, in_channels=3)
+    model.to(device_id)
+
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    # Train the model
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, args.num_epochs, device_id=device_id)
+    
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
+    
+    # Arguments for local execution
+    parser.add_argument('--data_path', type=str, required=True, help='Path to dataset directory (can be full dataset or a subset).')
+    parser.add_argument('--logname', type=str, default='local_train.log', help='Log file name')
+    parser.add_argument('--num_epochs', type=int, default=5, help='Number of training epochs')
+    parser.add_argument('--batch_size', type=int, default=32, help='Input batch size for training')
+    parser.add_argument('--img_size', type=int, default=256, help='Input image size')
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for DataLoader')
+    
+    args = parser.parse_args()
+    
+    # Call the local training function
+    gdt_imagenet_train_local(args)

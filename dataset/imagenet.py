@@ -144,11 +144,6 @@ if __name__ == "__main__":
     start_time = time.time()
     for phase in ['train', 'val']:
         for step, inputs, labels in enumerate(dataloaders[phase]):
-            # Your training/validation/inference code goes here
-            # For example:
-            # model_output = model(inputs)
-            # loss = loss_function(model_output, labels)
-            # ...
             if step%500==0:
                 print(step)
     print("Time cost for loading {}".format(time.time() - start_time))
