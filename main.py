@@ -28,7 +28,7 @@ def main(args):
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    if args.task == "gdt_imagenet":
+    if args.task == "gdt_imagenet_ddp":
         gdt_imagenet_train(args=args)
     else:
         raise "No such task."

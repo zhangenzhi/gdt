@@ -8,11 +8,9 @@ import numpy as np
 # --- 图像处理和可视化所需的库 ---
 from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
-
-# 为了方便，我们使用现成的 TransformerEncoder
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-
+from gdt.gdt import AdaptiveFocusViT, HierarchicalViTEncoder, DownstreamViTClassifier
 
 # ======================================================================
 # 新增: 模型创建函数
