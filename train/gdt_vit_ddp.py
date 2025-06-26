@@ -155,6 +155,8 @@ def gdt_imagenet_train_local(args):
     
 if __name__ == "__main__":
     import argparse
+    import sys
+    sys.path.append("./")
     
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
