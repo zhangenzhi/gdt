@@ -157,6 +157,7 @@ if __name__ == "__main__":
     import argparse
     import sys
     sys.path.append("./")
+    import pdb;pdb.set_trace()
     
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
