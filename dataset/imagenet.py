@@ -72,8 +72,8 @@ import random
 
 def imagenet_subset(args):
     # Define the paths
-    original_data_dir = args.original_data_dir
-    subset_data_dir = args.subset_data_dir 
+    original_data_dir = args.data_dir
+    subset_data_dir = args.output 
 
     # Define the number of samples you want in your subset
     subset_size = 1000  # Adjust this as per your requirement
