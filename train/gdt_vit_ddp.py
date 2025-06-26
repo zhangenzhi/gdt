@@ -158,17 +158,23 @@ def gdt_imagenet_train_local(args):
     
 if __name__ == "__main__":
     import argparse
-    import pdb;pdb.set_trace()
     
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
     # Arguments for local execution
-    parser.add_argument('--data_path', type=str, required=True, help='Path to dataset directory (can be full dataset or a subset).')
-    parser.add_argument('--logname', type=str, default='local_train.log', help='Log file name')
-    parser.add_argument('--num_epochs', type=int, default=5, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=32, help='Input batch size for training')
-    parser.add_argument('--img_size', type=int, default=256, help='Input image size')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for DataLoader')
+    parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
+    parser.add_argument('--logname', type=str, default='train.log', help='logging of task.')
+    parser.add_argument('--output', type=str, default='./output', help='output dir')
+    parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
+    parser.add_argument('--gpus', type=int, default=8, help='Epochs for iteration')
+    parser.add_argument('--nodes', type=int, default=1, help='Epochs for iteration')
+    parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--seq_length', type=int, default=196, help='Epochs for iteration')
+    parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
+    parser.add_argument('--pretrained', type=bool, default=False, help='Use pretrained weights')
+    parser.add_argument('--reload', type=bool, default=True, help='Reuse previous weights')
     
     args = parser.parse_args()
     
