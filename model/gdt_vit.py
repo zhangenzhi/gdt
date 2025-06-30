@@ -48,7 +48,7 @@ def create_gdt_cls(
         num_patches = num_parents_for_next_stage * children_per_parent
     # 这里的计算逻辑为了保持创建函数的简洁性，可以简化
     # 实际精确计算很复杂，但对于定义一个足够大的pos_embed是ok的
-    TOTAL_LEAF_TOKENS = 1024 # 使用之前精确计算的结果
+    TOTAL_LEAF_TOKENS = 256 # 使用之前精确计算的结果
 
     # --- 创建编码器 ---
     encoder = HierarchicalViTEncoder(
