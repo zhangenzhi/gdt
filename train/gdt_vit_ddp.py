@@ -136,7 +136,7 @@ def gdt_imagenet_train_local(args):
 
     device_id = 0
     # Create DataLoader for training and validation
-    dataloaders = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size)
+    dataloaders,_ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size)
 
     # Create ViT model
     IMG_SIZE = args.img_size
