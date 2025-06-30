@@ -13,7 +13,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import logging
 
 # from model.vit import create_vit_model
-from dataset.imagenet import imagenet_distribute, imagenet_subset
+from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 from model.gdt_vit import create_gdt_cls
 
 # Configure logging
@@ -136,7 +136,7 @@ def gdt_imagenet_train_local(args):
 
     device_id = 0
     # Create DataLoader for training and validation
-    dataloaders = imagenet_subset(args=args)
+    dataloaders = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size)
 
     # Create ViT model
     IMG_SIZE = args.img_size
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
     parser.add_argument('--gpus', type=int, default=8, help='Epochs for iteration')
     parser.add_argument('--nodes', type=int, default=1, help='Epochs for iteration')
-    parser.add_argument('--data_dir', type=str, default='/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--seq_length', type=int, default=196, help='Epochs for iteration')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
