@@ -197,7 +197,6 @@ class AdaptiveFocusViT(nn.Module):
         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
         
         # 4. 送入下游分类器
-        import pdb; pdb.set_trace()
         logits = self.classifier(final_sequence)
         
         return logits
