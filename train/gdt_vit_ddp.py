@@ -17,9 +17,11 @@ from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 from model.gdt_vit import create_gdt_cls
 
 # Configure logging
+# Configure logging
 def log(args):
+    os.makedirs(os.path.join(args.output,args.savefile), exist_ok=True)
     logging.basicConfig(
-        filename=args.logname,
+        filename=os.path.join(os.path.join(args.output,args.savefile), "out.log"),
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
