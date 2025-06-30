@@ -146,7 +146,7 @@ def gdt_imagenet_train_local(args):
         {"depth": 4, "patch_size_in": 8, "patch_size_out": 4, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
         {"depth": 4, "patch_size_in": 4, "patch_size_out": 2, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
     ]
-    model = create_gdt_cls(img_size=IMG_SIZE, stages_config=stages_config, target_leaf_size=16, encoder_embed_dim=786, classifier_embed_dim=786, num_classes=1000, in_channels=3)
+    model = create_gdt_cls(img_size=IMG_SIZE, stages_config=stages_config, target_leaf_size=16, encoder_embed_dim=768, classifier_embed_dim=768, num_classes=1000, in_channels=3)
     model.to(device_id)
 
     # Define loss function and optimizer
