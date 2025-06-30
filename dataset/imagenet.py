@@ -146,7 +146,7 @@ def imagenet_subloaders(subset_data_dir, batch_size=32, num_workers=4):
     # Define transformations for training (with data augmentation) and validation (no augmentation)
     data_transforms = {
         'train': transforms.Compose([
-            transforms.RandomResizedCrop(224),
+            transforms.RandomResizedCrop(256),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
