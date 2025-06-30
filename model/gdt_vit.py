@@ -13,7 +13,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from gdt.gdt import AdaptiveFocusViT, HierarchicalViTEncoder, DownstreamViTClassifier
 
 # ======================================================================
-# 新增: 模型创建函数
+# 模型创建函数
 # ======================================================================
 def create_gdt_cls(
     img_size: int,
@@ -60,7 +60,7 @@ def create_gdt_cls(
     print(f"计算出的总叶子结点数量: {total_leaf_nodes}")
     print("---------------------------------------")
     
-    TOTAL_LEAF_TOKENS = 256 # 使用之前精确计算的结果
+    TOTAL_LEAF_TOKENS = total_leaf_nodes # 使用之前精确计算的结果
 
     # --- 创建编码器 ---
     encoder = HierarchicalViTEncoder(
