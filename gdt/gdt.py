@@ -13,7 +13,7 @@ from torchvision import transforms
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 # ======================================================================
-# 基础模块 (与之前版本相同)
+# 基础模块 
 # ======================================================================
 class SinusoidalPositionalEncoder(nn.Module):
     def __init__(self, embed_dim: int, max_coord_val: int = 512):
@@ -43,7 +43,7 @@ class GumbelTopKSelector(nn.Module):
         return ste_mask, top_k_indices
 
 # ======================================================================
-# 编码器部分 (Hierarchical ViT Encoder) - 负责选择
+# 编码器部分 (Hierarchical ViT Encoder)
 # ======================================================================
 class HierarchicalStage(nn.Module):
     def __init__(self, *, embed_dim: int, depth: int, num_heads: int, patch_size_in: int, patch_size_out: int, k_selected_ratio: float, max_seq_len: int, in_channels: int, mlp_ratio=4.0, dropout=0.1):
@@ -197,6 +197,7 @@ class AdaptiveFocusViT(nn.Module):
         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
         
         # 4. 送入下游分类器
+        import pdb; pdb.set_trace()
         logits = self.classifier(final_sequence)
         
         return logits
