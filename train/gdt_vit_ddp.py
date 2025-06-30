@@ -50,7 +50,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
             # Log training progress
             running_loss += loss.item()
-            if i % 100 == 99 and device_id == 0:  # Log every 100 mini-batches
+            if i % 100 == 0 and device_id == 0:  # Log every 100 mini-batches
                 logging.info('[%d, %5d] loss: %.3f', epoch + 1, i + 1, running_loss / 100)
                 running_loss = 0.0
 
@@ -128,7 +128,7 @@ def gdt_imagenet_train(args):
     train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, args.num_epochs, device_id=device_id)
     dist.destroy_process_group()
 
-def gdt_vit_ddp(args):
+def gdt_imagenet_vit_ddp(args):
     log(args=args)
     args.world_size = int(os.environ['SLURM_NTASKS'])
     gdt_imagenet_train(args=args)

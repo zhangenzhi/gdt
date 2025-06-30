@@ -1,7 +1,7 @@
 import os
 import argparse
 
-from train.gdt_vit_ddp import gdt_imagenet_train
+from train.gdt_vit_ddp import gdt_imagenet_vit_ddp
 
 
 def parse_args():
@@ -28,8 +28,8 @@ def main(args):
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    if args.task == "gdt_imagenet_ddp":
-        gdt_imagenet_train(args=args)
+    if args.task == "gdt_imagenet_vit_ddp":
+        gdt_imagenet_vit_ddp(args=args)
     else:
         raise "No such task."
     
