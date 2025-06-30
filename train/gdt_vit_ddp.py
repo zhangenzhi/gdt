@@ -168,7 +168,6 @@ if __name__ == "__main__":
     parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
     parser.add_argument('--img_size', type=int, default=256, help='Epochs for iteration')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--seq_length', type=int, default=196, help='Epochs for iteration')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')

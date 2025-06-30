@@ -64,7 +64,7 @@ def create_gdt_cls(
         num_tokens=TOTAL_LEAF_TOKENS,
         embed_dim=classifier_embed_dim,
         depth=6,
-        num_heads=8,
+        num_heads=12,
         num_classes=num_classes
     )
 
