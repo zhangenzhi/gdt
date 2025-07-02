@@ -19,7 +19,7 @@ module load rocm/6.2.0
 srun -N 2 -n 8 --ntasks-per-node 8 python main.py \
     --task gdt_imagenet_vit_ddp \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --batch_size 16 \
+    --batch_size 128 \
     --num_workers 32 \
     --num_epochs 100 \
     --savefile gdt-vit-n2
