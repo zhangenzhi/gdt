@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-from gdt.gdt import AdaptiveFocusViT, HierarchicalViTEncoder, DownstreamViTClassifier
+from gdt.gdt import HierarchicalViTEncoder
 
 # ======================================================================
 # 模型创建函数
