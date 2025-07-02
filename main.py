@@ -12,6 +12,7 @@ def parse_args():
     parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
     parser.add_argument('--gpus', type=int, default=8, help='Epochs for iteration')
     parser.add_argument('--nodes', type=int, default=1, help='Epochs for iteration')
+    parser.add_argument('--img_size', type=int, default=256, help='Epochs for iteration')
     parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
     parser.add_argument('--seq_length', type=int, default=196, help='Epochs for iteration')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')

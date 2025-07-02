@@ -89,3 +89,81 @@ def create_gdt_cls(
         in_channels=in_channels
     )
     return model
+
+# ======================================================================
+# 下游分类器部分 (Downstream Classifier) - 负责分类
+# ======================================================================
+class DownstreamViTClassifier(nn.Module):
+    def __init__(self, *, num_tokens: int, embed_dim: int, depth: int, num_heads: int, num_classes: int, mlp_ratio=4.0, dropout=0.1):
+        super().__init__()
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
+        self.pos_drop = nn.Dropout(p=dropout)
+        encoder_layer = TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=int(embed_dim*mlp_ratio), dropout=dropout, batch_first=True)
+        self.transformer = TransformerEncoder(encoder_layer, num_layers=depth)
+        self.norm = nn.LayerNorm(embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes)
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None: nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+            
+    def forward(self, x):
+        B = x.shape[0]
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
+        x = self.transformer(x)
+        x = self.norm(x)
+        return self.head(x[:, 0])
+
+# ======================================================================
+# 顶层模型 (AdaptiveFocusViT) - 组装所有部件
+# ======================================================================
+class AdaptiveFocusViT(nn.Module):
+    def __init__(self, encoder: HierarchicalViTEncoder, classifier: DownstreamViTClassifier, target_leaf_size: int, embed_dim: int, in_channels: int):
+        super().__init__()
+        self.encoder = encoder
+        self.classifier = classifier
+        self.target_leaf_size = target_leaf_size
+        self.in_channels = in_channels
+        self.leaf_embedder = nn.Linear(in_channels * target_leaf_size * target_leaf_size, embed_dim)
+        
+    def forward(self, img: torch.Tensor):
+        B = img.shape[0]
+        
+        # 1. 从编码器获取所有叶子结点
+        leaf_nodes_data = self.encoder(img)
+        
+        # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入
+        resized_leaf_tokens = []
+        for leaf_group in leaf_nodes_data:
+            raw_patches = leaf_group['patches'] # Shape: [B, Num_patches, C*S*S]
+            if raw_patches.numel() == 0: continue
+            
+            size_in = leaf_group['size']
+            num_patches_in_group = raw_patches.shape[1]
+            
+            patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
+            
+            # 使用 F.interpolate 进行可微分的缩放
+            resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
+            
+            resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
+            
+            tokens = self.leaf_embedder(resized_flat_patches)
+            resized_leaf_tokens.append(tokens)
+
+        # 3. 拼接所有叶子 token 成为一个序列
+        final_sequence = torch.cat(resized_leaf_tokens, dim=1)
+        
+        # 4. 送入下游分类器
+        logits = self.classifier(final_sequence)
+        
+        return logits
