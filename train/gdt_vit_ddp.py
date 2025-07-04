@@ -1,185 +1,266 @@
 import os
 import sys
-sys.path.append("./")
-    
+import yaml # For loading the config file
+import logging
+import argparse
+
 import torch
 from torch import nn
-import torch.utils.data as data  # For custom dataset (optional)
+import torch.utils.data as data
 import torchvision.transforms as transforms
 
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import logging
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
-# from model.vit import create_vit_model
+# Assume your model and dataset files are in these locations
+sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 from model.gdt_vit import create_gdt_cls
 
-# Configure logging
-# Configure logging
-def log(args):
-    os.makedirs(os.path.join(args.output,args.savefile), exist_ok=True)
+def setup_logging(args):
+    """Configures logging to file and console."""
+    log_dir = os.path.join(args.output, args.savefile)
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Configure logging
     logging.basicConfig(
-        filename=os.path.join(os.path.join(args.output,args.savefile), "out.log"),
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - RANK {} - %(levelname)s - %(message)s'.format(dist.get_rank() if dist.is_initialized() else 0),
+        handlers=[
+            logging.FileHandler(os.path.join(log_dir, "out.log")),
+            logging.StreamHandler(sys.stdout) # Also log to console
+        ]
     )
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device_id):
-    model.train()  # Set model to training mode
-    total_step = len(train_loader)
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args):
+    """Main training loop with improved logging, checkpointing, and metrics."""
+    model.train()
     best_val_acc = 0.0
-    logging.info("Training the ViT model for %d epochs...", num_epochs)
+    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    
+    logging.info("Starting training for %d epochs...", num_epochs)
 
     for epoch in range(num_epochs):
-        logging.info("Epoch %d/%d", epoch + 1, num_epochs)
+        train_loader.sampler.set_epoch(epoch) # Important for DDP shuffling
+        
         running_loss = 0.0
+        running_corrects = 0
+        running_total = 0
+        
         for i, (images, labels) in enumerate(train_loader):
+            model.train()
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
+            
             optimizer.zero_grad()
 
-            # Forward pass, calculate loss
-            outputs = model(images)
+            # Forward pass
+            outputs, _ = model(images) # Assuming model returns (logits, viz_data)
             loss = criterion(outputs, labels)
 
             # Backward pass and optimize
             loss.backward()
+            # Optional: Gradient Clipping
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            # Log training progress
+            # --- Calculate Training Accuracy ---
+            _, predicted = torch.max(outputs.data, 1)
+            running_total += labels.size(0)
+            running_corrects += (predicted == labels).sum().item()
             running_loss += loss.item()
-            if i % 100 == 0 and device_id == 0:  # Log every 100 mini-batches
-                logging.info('[%d, %5d] loss: %.3f', epoch + 1, i + 1, running_loss / 100)
+
+            if (i + 1) % 100 == 0 and device_id == 0:
+                train_acc = 100 * running_corrects / running_total
+                avg_loss = running_loss / 100
+                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
                 running_loss = 0.0
+                running_corrects = 0
+                running_total = 0
+                
+        # Update learning rate
+        scheduler.step()
 
-        # Validate after each epoch
-        model.eval()
+        # --- Validate after each epoch ---
         val_acc = evaluate_model(model, val_loader, device_id)
-        logging.info("Epoch: %d, Validation Accuracy: %.4f", epoch + 1, val_acc)
+        
+        # Log results only on the main process
+        if device_id == 0:
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
 
-        # Save the best model based on validation accuracy
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), "best_vit_model.pth")
+            # --- Save the best model ---
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                logging.info(f"New best validation accuracy: {best_val_acc:.4f}. Saving model to {checkpoint_path}")
+                # Save the unwrapped model's state dict
+                torch.save(model.module.state_dict(), checkpoint_path)
 
-        logging.info('Finished Training Step %d', epoch + 1)
-
-    logging.info('Finished Training. Best Validation Accuracy: %.4f', best_val_acc)
+    if device_id == 0:
+        logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
 def evaluate_model(model, val_loader, device_id):
+    """Evaluates the model, correctly handling DDP synchronization."""
+    model.eval()
     correct = 0
     total = 0
     with torch.no_grad():
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
-            outputs = model(images)
+            outputs, _ = model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    accuracy = 100 * correct / total
+    # --- Synchronize results across all GPUs in DDP ---
+    # Create tensors on the current device
+    total_tensor = torch.tensor(total).to(device_id)
+    correct_tensor = torch.tensor(correct).to(device_id)
+    
+    # Sum up (reduce) the results from all processes
+    dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+
+    accuracy = 100 * correct_tensor.item() / total_tensor.item()
     return accuracy
 
-def gdt_imagenet_train(args):
+def setup_ddp(rank, world_size):
+    """Initializes the distributed process group."""
     local_rank = int(os.environ['SLURM_LOCALID'])
-    os.environ['MASTER_ADDR'] = str(os.environ['HOSTNAME']) #str(os.environ['HOSTNAME'])
+    os.environ['MASTER_ADDR'] = os.environ.get('HOSTNAME', 'localhost')
     os.environ['MASTER_PORT'] = "29500"
+    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ['RANK'] = str(rank)
     os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']
     os.environ['RANK'] = os.environ['SLURM_PROCID']
-    print("MASTER_ADDR:{}, MASTER_PORT:{}, WORLD_SIZE:{}, WORLD_RANK:{}, local_rank:{}".format(os.environ['MASTER_ADDR'], 
-                                                    os.environ['MASTER_PORT'], 
-                                                    os.environ['WORLD_SIZE'], 
-                                                    os.environ['RANK'],
-                                                    local_rank))
-    dist.init_process_group(                                   
-    	backend='nccl',                                         
-   		init_method='env://',                                   
-    	world_size=args.world_size,                              
-    	rank=int(os.environ['RANK'])                                               
-    )
+    print("MASTER_ADDR:{}, MASTER_PORT:{}, WORLD_SIZE:{}, WORLD_RANK:{}, local_rank:{}".format(os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], os.environ['WORLD_SIZE'], os.environ['RANK'], local_rank))
     print("SLURM_LOCALID/lcoal_rank:{}, dist_rank:{}".format(local_rank, dist.get_rank()))
-
-    print(f"Start running basic DDP example on rank {local_rank}.")
-    device_id = local_rank % torch.cuda.device_count()
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=int(os.environ['RANK']))
     
-    # Create DataLoader for training and validation
+def gdt_imagenet_train(args, config):
+    """Main DDP training function."""
+    rank = int(os.environ['SLURM_PROCID'])
+    world_size = int(os.environ['SLURM_NTASKS'])
+    setup_ddp(rank, world_size)
+    
+    local_rank = int(os.environ['SLURM_LOCALID'])
+    device_id = local_rank % torch.cuda.device_count()
+    torch.cuda.set_device(device_id)
+    
+    if rank == 0:
+        setup_logging(args)
+    
+    logging.info(f"DDP Initialized. Rank {rank}/{world_size} on device {device_id}")
+
     dataloaders = imagenet_distribute(args=args)
 
-    # Create ViT model
-    IMG_SIZE = args.img_size
-    stages_config = [
-        {"depth": 4, "patch_size_in": 32, "patch_size_out": 16, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 16, "patch_size_out": 8, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 8, "patch_size_out": 4, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 4, "patch_size_out": 2, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-    ]
-    model = create_gdt_cls(img_size=IMG_SIZE, stages_config=stages_config, target_leaf_size=16, encoder_embed_dim=768, classifier_embed_dim=768, num_classes=1000, in_channels=3)
+    model = create_gdt_cls(
+        img_size=config['encoder']['img_size'],
+        stages_config=config['encoder']['stages'],
+        target_leaf_size=config['classifier']['target_leaf_size'],
+        encoder_embed_dim=config['encoder']['embed_dim'],
+        classifier_embed_dim=config['classifier']['embed_dim'],
+        num_classes=config['classifier']['num_classes']
+    )
+    
+    # --- Load checkpoint if specified ---
+    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    if args.reload and os.path.exists(checkpoint_path):
+        logging.info(f"Reloading model from {checkpoint_path}")
+        # Load state dict on the correct device
+        map_location = {'cuda:0': f'cuda:{device_id}'}
+        model.load_state_dict(torch.load(checkpoint_path, map_location=map_location))
+        
     model.to(device_id)
     model = DDP(model, device_ids=[device_id])
 
-    # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    # Train the model
-    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, args.num_epochs, device_id=device_id)
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
     dist.destroy_process_group()
 
-def gdt_imagenet_vit_ddp(args):
-    log(args=args)
-    args.world_size = int(os.environ['SLURM_NTASKS'])
-    gdt_imagenet_train(args=args)
 
-
-def gdt_imagenet_train_local(args):
-    log(args=args)
+def gdt_imagenet_train_local(args, config):
+    """Main function for local (non-DDP) training."""
+    setup_logging(args)
     
     device_id = 0
-    # Create DataLoader for training and validation
-    dataloaders,_ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size)
+    torch.cuda.set_device(device_id)
+    logging.info(f"Starting local training on device {device_id}")
 
-    # Create ViT model
-    IMG_SIZE = args.img_size
-    stages_config = [
-        {"depth": 4, "patch_size_in": 32, "patch_size_out": 16, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 16, "patch_size_out": 8, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 8, "patch_size_out": 4, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-        {"depth": 4, "patch_size_in": 4, "patch_size_out": 2, "k_selected_ratio": 0.25, "max_seq_len": (IMG_SIZE//32)**2},
-    ]
-    model = create_gdt_cls(img_size=IMG_SIZE, stages_config=stages_config, target_leaf_size=16, encoder_embed_dim=768, classifier_embed_dim=768, num_classes=1000, in_channels=3)
+    dataloaders, _ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=config['training']['batch_size'])
+
+    model = create_gdt_cls(
+        img_size=config['encoder']['img_size'],
+        stages_config=config['encoder']['stages'],
+        target_leaf_size=config['classifier']['target_leaf_size'],
+        encoder_embed_dim=config['encoder']['embed_dim'],
+        classifier_embed_dim=config['classifier']['embed_dim'],
+        num_classes=config['classifier']['num_classes']
+    )
+
+    # --- Load checkpoint if specified ---
+    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    if args.reload and os.path.exists(checkpoint_path):
+        logging.info(f"Reloading model from {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path))
+
     model.to(device_id)
 
-    # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    # Train the model
-    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, args.num_epochs, device_id=device_id)
+    # A mock DDP wrapper for compatibility with the train_model function
+    class MockDDP(nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.module = model
+        def forward(self, *args, **kwargs):
+            return self.module(*args, **kwargs)
+    
+    mock_ddp_model = MockDDP(model)
+    # A mock sampler for compatibility
+    class MockSampler:
+        def set_epoch(self, epoch):
+            pass
+    dataloaders['train'].sampler = MockSampler()
+
+    train_model(mock_ddp_model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
     
 if __name__ == "__main__":
-    import argparse
-    
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
-    # Arguments for local execution
+    parser.add_argument('--config', type=str, default='config.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
-    parser.add_argument('--logname', type=str, default='train.log', help='logging of task.')
-    parser.add_argument('--output', type=str, default='./output', help='output dir')
-    parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
-    parser.add_argument('--img_size', type=int, default=256, help='Epochs for iteration')
+    parser.add_argument('--output', type=str, default='./output', help='Base output directory')
+    parser.add_argument('--savefile', type=str, default='gdt-vit-imagenet', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
-    parser.add_argument('--pretrained', type=bool, default=False, help='Use pretrained weights')
-    parser.add_argument('--reload', type=bool, default=True, help='Reuse previous weights')
+    # Use action='store_true' for boolean flags
+    parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
+    parser.add_argument('--local', action='store_true', help='Run training locally without DDP')
     
     args = parser.parse_args()
+    
+    # Load config from YAML file
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Update args from config for consistency
+    args.img_size = config['encoder']['img_size']
+    args.num_epochs = config['training']['num_epochs']
+    args.batch_size = config['training']['batch_size']
+    
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    # Call the local training function
-    gdt_imagenet_train_local(args)
+    if args.local:
+        gdt_imagenet_train_local(args, config)
+    else:
+        # This part is for SLURM DDP execution
+        gdt_imagenet_train(args, config)

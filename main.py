@@ -1,39 +1,60 @@
 import os
+import sys
+import yaml
 import argparse
 
-from train.gdt_vit_ddp import gdt_imagenet_vit_ddp
+# Ensure the project root is in the python path
+# This allows us to run `python main.py` from the root directory
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# We import the functions from the training script, which now acts as a library
+from train.gdt_vit_ddp import gdt_imagenet_train, gdt_imagenet_train_local
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
-    parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
-    parser.add_argument('--logname', type=str, default='train.log', help='logging of task.')
-    parser.add_argument('--output', type=str, default='./output', help='output dir')
-    parser.add_argument('--savefile', type=str, default='vit-imagenet', help='output dir')
-    parser.add_argument('--gpus', type=int, default=8, help='Epochs for iteration')
-    parser.add_argument('--nodes', type=int, default=1, help='Epochs for iteration')
-    parser.add_argument('--img_size', type=int, default=256, help='Epochs for iteration')
-    parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
-    parser.add_argument('--seq_length', type=int, default=196, help='Epochs for iteration')
-    parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
-    parser.add_argument('--pretrained', type=bool, default=False, help='Use pretrained weights')
-    parser.add_argument('--reload', type=bool, default=True, help='Reuse previous weights')
-    parser.add_argument('--2d', type=bool, default=True, help='Use flat the 3d mri image to 2d.')
+def main():
+    """
+    Main entry point for launching GDT-ViT training.
+    This script parses arguments, loads configuration, and decides whether
+    to run in a distributed (DDP) mode for SLURM or a local single-GPU mode.
+    """
+    parser = argparse.ArgumentParser(description='Launcher for GDT-ViT Training')
     
+    # Core arguments that define the experiment
+    parser.add_argument('--config', type=str, default='./configs/gdt_vit.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--output', type=str, default='./output', help='Base output directory for logs and models.')
+    parser.add_argument('--savefile', type=str, default='run_01', help='Subdirectory name for saving logs and models for this specific run.')
+    parser.add_argument('--data_dir', type=str, default='/lustre/orion/nro108/world-shared/enzhi/gdt/dataset', help='Path to the ImageNet dataset directory')
+    
+    # Execution flags
+    parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists.')
+    parser.add_argument('--local', action='store_true', help='Force local (single-GPU) training, even in a SLURM environment.')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader.')
+
     args = parser.parse_args()
-    return args
 
-def main(args):
-    args.output = os.path.join(args.output, args.task)
-    os.makedirs(args.output, exist_ok=True)
+    # --- Load Config ---
+    try:
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Error: Configuration file not found at {args.config}")
+        sys.exit(1)
+
+    # --- Prepare output directory ---
+    # The final output path will be ./output/{task_name_from_config}/{savefile}
+    task_name = config.get('task_name', 'default_task')
+    args.output = os.path.join(args.output, task_name)
+    os.makedirs(os.path.join(args.output, args.savefile), exist_ok=True)
     
-    if args.task == "gdt_imagenet_vit_ddp":
-        gdt_imagenet_vit_ddp(args=args)
+    # --- Decide on execution mode ---
+    # Check for SLURM environment variables to decide whether to run in DDP mode
+    is_ddp_environment = 'SLURM_PROCID' in os.environ and not args.local
+
+    if is_ddp_environment:
+        print("--- Detected SLURM environment. Running in DDP Mode. ---")
+        gdt_imagenet_train(args, config)
     else:
-        raise "No such task."
-    
+        print("--- Running in Local Mode (Single GPU, No DDP). ---")
+        gdt_imagenet_train_local(args, config)
+
 if __name__ == '__main__':
-    args = parse_args()
-    main(args=args)
+    main()
