@@ -154,7 +154,9 @@ def gdt_imagenet_train(args, config):
     
     logging.info(f"DDP Initialized. Rank {rank}/{world_size} on device {device_id}")
 
-    dataloaders = imagenet_distribute(args=args)
+    dataloaders = imagenet_distribute(data_dir=args.data_dir,
+                                      img_size=config['encoder']['img_size'],
+                                      batch_size=config['training']['batch_size'])
 
     model = create_gdt_cls(
         img_size=config['encoder']['img_size'],
