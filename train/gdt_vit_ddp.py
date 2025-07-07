@@ -136,8 +136,8 @@ def setup_ddp(rank, world_size):
     os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']
     os.environ['RANK'] = os.environ['SLURM_PROCID']
     print("MASTER_ADDR:{}, MASTER_PORT:{}, WORLD_SIZE:{}, WORLD_RANK:{}, local_rank:{}".format(os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], os.environ['WORLD_SIZE'], os.environ['RANK'], local_rank))
-    print("SLURM_LOCALID/lcoal_rank:{}, dist_rank:{}".format(local_rank, dist.get_rank()))
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=int(os.environ['RANK']))
+    print("SLURM_LOCALID/lcoal_rank:{}, dist_rank:{}".format(local_rank, dist.get_rank()))
     
 def gdt_imagenet_train(args, config):
     """Main DDP training function."""
