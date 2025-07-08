@@ -1,7 +1,7 @@
 import argparse
 import torch
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 
 import os
 import random
@@ -182,6 +182,41 @@ def imagenet_subloaders(subset_data_dir, batch_size=32, num_workers=4):
     return dataloaders, class_names
 
 
+class LocalEpochSampler(Sampler):
+    """
+    A sampler for local (non-DDP) training that shuffles data differently
+    each epoch. It mimics the behavior of DistributedSampler's set_epoch() 
+    method for API compatibility.
+    """
+    def __init__(self, data_source, shuffle=True):
+        self.data_source = data_source
+        self.shuffle = shuffle
+        self.epoch = 0
+
+    def __iter__(self):
+        n = len(self.data_source)
+        indices = list(range(n))
+        
+        if self.shuffle:
+            # Use the epoch number to seed the random number generator
+            # to ensure different shuffling for each epoch.
+            g = torch.Generator()
+            g.manual_seed(self.epoch)
+            perm = torch.randperm(n, generator=g).tolist()
+            return iter(perm)
+        else:
+            return iter(indices)
+
+    def __len__(self):
+        return len(self.data_source)
+
+    def set_epoch(self, epoch: int):
+        """
+        This method is called by the training loop to ensure shuffling is different
+        across epochs.
+        """
+        self.epoch = epoch
+        
 # epoch iteration
 def imagenet_iter(args):
     dataloaders = imagenet(args=args)
