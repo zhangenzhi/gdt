@@ -28,7 +28,7 @@ classifier:
 # These are adjusted for a local, single-GPU environment.
 training:
   optimizer: "AdamW"
-  learning_rate: 0.001
+  learning_rate: 0.0001
   weight_decay: 0.05
   scheduler: "CosineAnnealingLR"
   min_lr: 1.0e-6

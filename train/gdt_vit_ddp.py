@@ -78,7 +78,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             running_loss += loss.item()
 
             if (i+1) % 10 == 0 and device_id == 0:
-                train_acc = 10 * running_corrects / running_total
+                train_acc = 100 * running_corrects / running_total
                 avg_loss = running_loss / 10
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
                 running_loss = 0.0
