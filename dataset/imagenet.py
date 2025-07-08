@@ -226,8 +226,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
     parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
     parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
-    parser.add_argument('--train_imgs', type=int, default=50, help="Number of training images per class.")
-    parser.add_argument('--val_imgs', type=int, default=10, help="Number of validation images per class.")
+    parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
+    parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
     
     args = parser.parse_args()
 
