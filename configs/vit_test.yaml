@@ -1,7 +1,7 @@
 # Configuration for the Baseline Vision Transformer (ViT) Model
 
 # A name for this specific experiment run, used for creating output directories
-task_name: "vit_imagenet_v1"
+task_name: "vit_imagenet_local_test"
 
 # 1. Model Architecture Configuration
 model:
@@ -12,7 +12,7 @@ model:
   depth: 12
   num_heads: 12
   mlp_ratio: 4.0
-  num_classes: 1000
+  num_classes: 10
 
 # 2. Training Hyperparameters
 training:
@@ -21,5 +21,5 @@ training:
   weight_decay: 0.05
   scheduler: "CosineAnnealingLR"
   min_lr: 1.0e-6
-  num_epochs: 100
+  num_epochs: 120
   batch_size: 256 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
