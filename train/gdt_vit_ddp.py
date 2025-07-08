@@ -34,16 +34,20 @@ def setup_logging(args):
         ]
     )
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args):
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
     """Main training loop with improved logging, checkpointing, and metrics."""
     model.train()
     best_val_acc = 0.0
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    # Only the main process should log general info
+    is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
     
     logging.info("Starting training for %d epochs...", num_epochs)
 
     for epoch in range(num_epochs):
-        train_loader.sampler.set_epoch(epoch) # Important for DDP shuffling
+        # --- FIXED: Conditionally set epoch for the sampler ---
+        if is_ddp:
+            train_loader.sampler.set_epoch(epoch)
         
         running_loss = 0.0
         running_corrects = 0
@@ -84,27 +88,26 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         scheduler.step()
 
         # --- Validate after each epoch ---
-        val_acc = evaluate_model(model, val_loader, device_id)
+        val_acc = evaluate_model(model, val_loader, device_id, is_ddp)
         
-        # Log results only on the main process
-        if device_id == 0:
+        if is_main_process:
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
 
-            # --- Save the best model ---
+            # --- FIXED: Conditionally save the model ---
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 logging.info(f"New best validation accuracy: {best_val_acc:.4f}. Saving model to {checkpoint_path}")
-                # Save the unwrapped model's state dict
-                torch.save(model.module.state_dict(), checkpoint_path)
+                # Unwrap the model before saving if it's a DDP model
+                model_to_save = model.module if is_ddp else model
+                torch.save(model_to_save.state_dict(), checkpoint_path)
 
-    if device_id == 0:
+    if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
-def evaluate_model(model, val_loader, device_id):
-    """Evaluates the model, correctly handling DDP synchronization."""
+def evaluate_model(model, val_loader, device_id, is_ddp=False):
+    """Evaluates the model, correctly handling DDP synchronization if needed."""
     model.eval()
-    correct = 0
-    total = 0
+    correct, total = 0, 0
     with torch.no_grad():
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
@@ -114,16 +117,16 @@ def evaluate_model(model, val_loader, device_id):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    # --- Synchronize results across all GPUs in DDP ---
-    # Create tensors on the current device
-    total_tensor = torch.tensor(total).to(device_id)
-    correct_tensor = torch.tensor(correct).to(device_id)
-    
-    # Sum up (reduce) the results from all processes
-    dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
-    dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+    # --- FIXED: Conditionally synchronize results across all GPUs in DDP ---
+    if is_ddp:
+        total_tensor = torch.tensor(total, device=device_id)
+        correct_tensor = torch.tensor(correct, device=device_id)
+        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+        total = total_tensor.item()
+        correct = correct_tensor.item()
 
-    accuracy = 100 * correct_tensor.item() / total_tensor.item()
+    accuracy = 100 * correct / total if total > 0 else 0
     return accuracy
 
 def setup_ddp(rank, world_size):
@@ -182,19 +185,25 @@ def gdt_imagenet_train(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=True)
     dist.destroy_process_group()
-
-
+    
 def gdt_imagenet_train_local(args, config):
     """Main function for local (non-DDP) training."""
     setup_logging(args)
     
     device_id = 0
-    torch.cuda.set_device(device_id)
-    logging.info(f"Starting local training on device {device_id}")
+    if torch.cuda.is_available():
+        torch.cuda.set_device(device_id)
+        logging.info(f"Starting local training on device cuda:{device_id}")
+    else:
+        device_id = "cpu"
+        logging.info(f"Starting local training on device {device_id}")
 
-    dataloaders, _ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=config['training']['batch_size'])
+    # Update args with config for dataloader
+    args.img_size = config['encoder']['img_size']
+    args.batch_size = config['training']['batch_size']
+    dataloaders, _ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers)
 
     model = create_gdt_cls(
         img_size=config['encoder']['img_size'],
@@ -205,11 +214,10 @@ def gdt_imagenet_train_local(args, config):
         num_classes=config['classifier']['num_classes']
     )
 
-    # --- Load checkpoint if specified ---
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     if args.reload and os.path.exists(checkpoint_path):
         logging.info(f"Reloading model from {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path))
+        model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device(device_id)))
 
     model.to(device_id)
 
@@ -217,29 +225,10 @@ def gdt_imagenet_train_local(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    # A mock DDP wrapper for compatibility with the train_model function
-    class MockDDP(nn.Module):
-        def __init__(self, model):
-            super().__init__()
-            self.module = model
-        def forward(self, *args, **kwargs):
-            return self.module(*args, **kwargs)
-    
-    mock_ddp_model = MockDDP(model)
-    
-    train_dataset = dataloaders['train'].dataset
-    # 2. Create our new, proper sampler for the training set
-    from dataset.imagenet import LocalEpochSampler
-    train_sampler = LocalEpochSampler(train_dataset, shuffle=True)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config['training']['batch_size'],
-        sampler=train_sampler,
-        num_workers=args.num_workers
-    )
+    # --- FIXED: No need for MockSampler or MockDDP ---
+    # The train_model function now handles both cases via the `is_ddp` flag.
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
 
-    train_model(mock_ddp_model, train_loader, dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
-    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
