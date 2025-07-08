@@ -217,22 +217,22 @@ def gdt_imagenet_train_local(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    # A mock DDP wrapper for compatibility with the train_model function
-    class MockDDP(nn.Module):
-        def __init__(self, model):
-            super().__init__()
-            self.module = model
-        def forward(self, *args, **kwargs):
-            return self.module(*args, **kwargs)
+    # # A mock DDP wrapper for compatibility with the train_model function
+    # class MockDDP(nn.Module):
+    #     def __init__(self, model):
+    #         super().__init__()
+    #         self.module = model
+    #     def forward(self, *args, **kwargs):
+    #         return self.module(*args, **kwargs)
     
-    mock_ddp_model = MockDDP(model)
-    # A mock sampler for compatibility
-    class MockSampler:
-        def set_epoch(self, epoch):
-            pass
-    dataloaders['train'].sampler = MockSampler()
+    # mock_ddp_model = MockDDP(model)
+    # # A mock sampler for compatibility
+    # class MockSampler:
+    #     def set_epoch(self, epoch):
+    #         pass
+    # dataloaders['train'].sampler = MockSampler()
 
-    train_model(mock_ddp_model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
