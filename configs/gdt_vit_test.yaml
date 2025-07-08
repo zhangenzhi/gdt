@@ -22,7 +22,7 @@ classifier:
   embed_dim: 768 # Should generally match the encoder's output
   depth: 6
   num_heads: 12
-  num_classes: 1000
+  num_classes: 10
 
 # 3. Training Hyperparameters
 # These are adjusted for a local, single-GPU environment.
