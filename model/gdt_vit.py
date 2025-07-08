@@ -45,51 +45,6 @@ class DownstreamViTClassifier(nn.Module):
         x = self.transformer(x)
         x = self.norm(x)
         return self.head(x[:, 0])
-
-# # ======================================================================
-# # 顶层模型 (AdaptiveFocusViT) - 组装所有部件
-# # ======================================================================
-# class AdaptiveFocusViT(nn.Module):
-#     def __init__(self, encoder: HierarchicalViTEncoder, classifier: DownstreamViTClassifier, target_leaf_size: int, embed_dim: int, in_channels: int):
-#         super().__init__()
-#         self.encoder = encoder
-#         self.classifier = classifier
-#         self.target_leaf_size = target_leaf_size
-#         self.in_channels = in_channels
-#         self.leaf_embedder = nn.Linear(in_channels * target_leaf_size * target_leaf_size, embed_dim)
-        
-#     def forward(self, img: torch.Tensor):
-#         B = img.shape[0]
-        
-#         # 1. 从编码器获取所有叶子结点
-#         leaf_nodes_data = self.encoder(img)
-        
-#         # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入
-#         resized_leaf_tokens = []
-#         for leaf_group in leaf_nodes_data:
-#             raw_patches = leaf_group['patches'] # Shape: [B, Num_patches, C*S*S]
-#             if raw_patches.numel() == 0: continue
-            
-#             size_in = leaf_group['size']
-#             num_patches_in_group = raw_patches.shape[1]
-            
-#             patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
-            
-#             # 使用 F.interpolate 进行可微分的缩放
-#             resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
-            
-#             resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
-            
-#             tokens = self.leaf_embedder(resized_flat_patches)
-#             resized_leaf_tokens.append(tokens)
-
-#         # 3. 拼接所有叶子 token 成为一个序列
-#         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
-        
-#         # 4. 送入下游分类器
-#         logits = self.classifier(final_sequence)
-        
-#         return logits, final_sequence
     
 # ======================================================================
 # 顶层模型
