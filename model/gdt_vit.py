@@ -46,8 +46,53 @@ class DownstreamViTClassifier(nn.Module):
         x = self.norm(x)
         return self.head(x[:, 0])
 
+# # ======================================================================
+# # 顶层模型 (AdaptiveFocusViT) - 组装所有部件
+# # ======================================================================
+# class AdaptiveFocusViT(nn.Module):
+#     def __init__(self, encoder: HierarchicalViTEncoder, classifier: DownstreamViTClassifier, target_leaf_size: int, embed_dim: int, in_channels: int):
+#         super().__init__()
+#         self.encoder = encoder
+#         self.classifier = classifier
+#         self.target_leaf_size = target_leaf_size
+#         self.in_channels = in_channels
+#         self.leaf_embedder = nn.Linear(in_channels * target_leaf_size * target_leaf_size, embed_dim)
+        
+#     def forward(self, img: torch.Tensor):
+#         B = img.shape[0]
+        
+#         # 1. 从编码器获取所有叶子结点
+#         leaf_nodes_data = self.encoder(img)
+        
+#         # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入
+#         resized_leaf_tokens = []
+#         for leaf_group in leaf_nodes_data:
+#             raw_patches = leaf_group['patches'] # Shape: [B, Num_patches, C*S*S]
+#             if raw_patches.numel() == 0: continue
+            
+#             size_in = leaf_group['size']
+#             num_patches_in_group = raw_patches.shape[1]
+            
+#             patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
+            
+#             # 使用 F.interpolate 进行可微分的缩放
+#             resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
+            
+#             resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
+            
+#             tokens = self.leaf_embedder(resized_flat_patches)
+#             resized_leaf_tokens.append(tokens)
+
+#         # 3. 拼接所有叶子 token 成为一个序列
+#         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
+        
+#         # 4. 送入下游分类器
+#         logits = self.classifier(final_sequence)
+        
+#         return logits, final_sequence
+    
 # ======================================================================
-# 顶层模型 (AdaptiveFocusViT) - 组装所有部件
+# 顶层模型
 # ======================================================================
 class AdaptiveFocusViT(nn.Module):
     def __init__(self, encoder: HierarchicalViTEncoder, classifier: DownstreamViTClassifier, target_leaf_size: int, embed_dim: int, in_channels: int):
@@ -58,39 +103,24 @@ class AdaptiveFocusViT(nn.Module):
         self.in_channels = in_channels
         self.leaf_embedder = nn.Linear(in_channels * target_leaf_size * target_leaf_size, embed_dim)
         
-    def forward(self, img: torch.Tensor):
+    def forward(self, img: torch.Tensor) -> Tuple[torch.Tensor, List[Dict]]:
         B = img.shape[0]
-        
-        # 1. 从编码器获取所有叶子结点
         leaf_nodes_data = self.encoder(img)
-        
-        # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入
         resized_leaf_tokens = []
         for leaf_group in leaf_nodes_data:
-            raw_patches = leaf_group['patches'] # Shape: [B, Num_patches, C*S*S]
+            raw_patches = leaf_group['patches']
             if raw_patches.numel() == 0: continue
-            
             size_in = leaf_group['size']
             num_patches_in_group = raw_patches.shape[1]
-            
             patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
-            
-            # 使用 F.interpolate 进行可微分的缩放
             resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
-            
             resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
-            
             tokens = self.leaf_embedder(resized_flat_patches)
             resized_leaf_tokens.append(tokens)
-
-        # 3. 拼接所有叶子 token 成为一个序列
         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
-        
-        # 4. 送入下游分类器
         logits = self.classifier(final_sequence)
-        
-        return logits, final_sequence
-    
+        return logits, leaf_nodes_data
+
 # ======================================================================
 # 模型创建函数
 # ======================================================================
@@ -168,3 +198,61 @@ def create_gdt_cls(
         in_channels=in_channels
     )
     return model
+
+
+def visualize_evaluation_focus(original_image: Image.Image, leaf_nodes_data: List[Dict], target_leaf_size: int, img_size: int, output_filename: str):
+    """在评估时可视化模型的注意力焦点。"""
+    
+    # 准备画布和颜色
+    resized_orig = original_image.resize((img_size, img_size), Image.Resampling.LANCZOS)
+    leaf_map_canvas = Image.new("RGB", (img_size, img_size), "black")
+    resampled_map_canvas = Image.new("RGB", (img_size, img_size), "black")
+    
+    # 定义从大 patch (蓝色) 到小 patch (红色) 的颜色梯度
+    colors = [(0, 0, 255, 150), (0, 128, 255, 150), (0, 255, 255, 150), (255, 255, 0, 150), (255, 0, 0, 150)]
+    patch_sizes = sorted(list(set(item['size'] for item in leaf_nodes_data)), reverse=True)
+    color_map = {size: colors[i % len(colors)] for i, size in enumerate(patch_sizes)}
+
+    print("开始生成评估可视化图像...")
+
+    for group in leaf_nodes_data:
+        # 我们只可视化 batch 中的第一个样本
+        patches_tensor = group['patches'][0]
+        coords_tensor = group['coords'][0]
+        patch_size = group['size']
+        color = color_map.get(patch_size, (255, 255, 255, 150))
+
+        for i in range(patches_tensor.shape[0]):
+            coord = coords_tensor[i].cpu().numpy()
+            x, y = int(coord[0]), int(coord[1])
+            
+            # --- Part 2: 绘制带颜色的叶子结点图 ---
+            patch_tensor_chw = patches_tensor[i].view(3, patch_size, patch_size)
+            patch_img = transforms.ToPILImage()(patch_tensor_chw)
+            
+            color_overlay = Image.new("RGBA", patch_img.size, color)
+            colored_patch = Image.alpha_composite(patch_img.convert("RGBA"), color_overlay)
+            leaf_map_canvas.paste(colored_patch, (x, y))
+
+            # --- Part 3: 绘制统一采样后还原的图 ---
+            patch_as_img_tensor = patches_tensor[i].view(1, 3, patch_size, patch_size)
+            resampled_patch_tensor = F.interpolate(patch_as_img_tensor, size=(target_leaf_size, target_leaf_size), mode='bilinear', align_corners=False)
+            restored_patch_tensor = F.interpolate(resampled_patch_tensor, size=(patch_size, patch_size), mode='nearest')
+            restored_patch_img = transforms.ToPILImage()(restored_patch_tensor.squeeze(0))
+            resampled_map_canvas.paste(restored_patch_img, (x, y))
+            
+    # --- 拼接最终图像 ---
+    final_img = Image.new('RGB', (img_size * 3 + 20, img_size), (255, 255, 255))
+    final_img.paste(resized_orig, (0, 0))
+    final_img.paste(leaf_map_canvas, (img_size + 10, 0))
+    final_img.paste(resampled_map_canvas, (img_size * 2 + 20, 0))
+    
+    draw = ImageDraw.Draw(final_img)
+    try: font = ImageFont.truetype("arial.ttf", 12)
+    except IOError: font = ImageFont.load_default()
+    draw.text((10, 10), "1. Original Image", fill="black", font=font)
+    draw.text((img_size + 20, 10), "2. Leaf Node Map (Colored by Size)", fill="black", font=font)
+    draw.text((img_size * 2 + 30, 10), "3. Resampled & Restored Map", fill="black", font=font)
+
+    final_img.save(output_filename)
+    print(f"评估可视化结果已保存到文件: {output_filename}")

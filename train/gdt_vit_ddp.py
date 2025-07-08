@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 # Assume your model and dataset files are in these locations
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
-from model.gdt_vit import create_gdt_cls
+from model.gdt_vit import create_gdt_cls, visualize_evaluation_focus
 
 def setup_logging(args):
     """Configures logging to file and console."""
@@ -34,7 +34,7 @@ def setup_logging(args):
         ]
     )
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, config, is_ddp=False):
     """Main training loop with improved logging, checkpointing, and metrics."""
     model.train()
     best_val_acc = 0.0
@@ -89,7 +89,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         scheduler.step()
 
         # --- Validate after each epoch ---
-        val_acc = evaluate_model(model, val_loader, device_id, is_ddp)
+        val_acc = evaluate_model(model, val_loader, device_id, args, config, is_ddp)
         
         if is_main_process:
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
@@ -105,7 +105,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
-def evaluate_model(model, val_loader, device_id, is_ddp=False):
+def evaluate_model(model, val_loader, device_id, args, config, is_ddp=False):
     """Evaluates the model, correctly handling DDP synchronization if needed."""
     model.eval()
     correct, total = 0, 0
@@ -113,11 +113,20 @@ def evaluate_model(model, val_loader, device_id, is_ddp=False):
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
-            outputs, _ = model(images)
+            outputs, leaf_nodes_data = model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
+    log_dir = os.path.join(args.output, args.savefile)
+    visualize_evaluation_focus(
+        original_image=images,
+        leaf_nodes_data=leaf_nodes_data,
+        target_leaf_size=config['classifier']['target_leaf_size'],
+        img_size=args.img_size,
+        output_filename=log_dir
+    )
+        
     # --- FIXED: Conditionally synchronize results across all GPUs in DDP ---
     if is_ddp:
         total_tensor = torch.tensor(total, device=device_id)
@@ -186,7 +195,7 @@ def gdt_imagenet_train(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
 
-    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=True)
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, config, is_ddp=True)
     dist.destroy_process_group()
     
 def gdt_imagenet_train_local(args, config):
@@ -236,7 +245,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/gdt_vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='gdt_vit_local_test', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='gdt_vit_test_vis', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags

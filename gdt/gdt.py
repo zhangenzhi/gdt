@@ -115,10 +115,11 @@ class HierarchicalViTEncoder(nn.Module):
             unselected_mask = torch.ones(B, N_in, dtype=torch.bool, device=x.device)
             unselected_mask.scatter_(1, selected_indices_local, False)
             unselected_patches = current_raw_patches[unselected_mask].reshape(B, -1, current_raw_patches.shape[-1])
+            unselected_coords = current_coords[unselected_mask].reshape(B, -1, 2)
             if unselected_patches.numel() > 0:
-                all_leaf_nodes_data.append({'patches': unselected_patches, 'size': stage.patch_size_in})
+                all_leaf_nodes_data.append({'patches': unselected_patches, 'size': stage.patch_size_in, 'coords': unselected_coords})
             current_raw_patches = raw_patches_out
             current_coords = coords_out
         
-        all_leaf_nodes_data.append({'patches': current_raw_patches, 'size': self.stages[-1].patch_size_out})
+        all_leaf_nodes_data.append({'patches': current_raw_patches, 'size': self.stages[-1].patch_size_out, 'coords': current_coords})
         return all_leaf_nodes_data
