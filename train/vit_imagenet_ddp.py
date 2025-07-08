@@ -68,9 +68,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             running_corrects += (predicted == labels).sum().item()
             running_loss += loss.item()
 
-            if (i + 1) % 100 == 0 and is_main_process:
+            if (i + 1) % 10 == 0 and is_main_process:
                 train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
-                avg_loss = running_loss / 100
+                avg_loss = running_loss / 10
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
                 
