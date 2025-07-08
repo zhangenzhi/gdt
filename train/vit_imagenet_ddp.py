@@ -187,9 +187,9 @@ def vit_imagenet_train_local(args, config):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
+    parser = argparse.ArgumentParser(description="ViT Training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/vit.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='vit_vis', help='Subdirectory for saving logs and models')
