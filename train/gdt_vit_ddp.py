@@ -237,7 +237,7 @@ def gdt_imagenet_train_local(args, config):
 
     # --- FIXED: No need for MockSampler or MockDDP ---
     # The train_model function now handles both cases via the `is_ddp` flag.
-    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
+    train_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, config, is_ddp=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
