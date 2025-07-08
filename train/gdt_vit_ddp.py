@@ -53,7 +53,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         running_corrects = 0
         running_total = 0
         
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         for i, (images, labels) in enumerate(train_loader):
             model.train()
             images = images.to(device_id, non_blocking=True)
