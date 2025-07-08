@@ -1,0 +1,40 @@
+# Configuration for a LOCAL training run of the AdaptiveFocusViT (GDT-ViT) Model
+
+# A name for this specific experiment run, used for creating output directories
+task_name: "gdt_vit_local_test"
+
+# 1. Encoder (HierarchicalViTEncoder) Configuration
+# The model architecture is kept the same as the DDP config for a valid test.
+encoder:
+  img_size: 256 # Input image size
+  embed_dim: 768
+  num_heads: 12
+  in_channels: 3
+  stages:
+    - {depth: 4, patch_size_in: 32, patch_size_out: 16, k_selected_ratio: 0.25, max_seq_len: 64} # (256/32)^2 = 64
+    - {depth: 4, patch_size_in: 16, patch_size_out: 8,  k_selected_ratio: 0.25, max_seq_len: 64}
+    - {depth: 4, patch_size_in: 8,  patch_size_out: 4,  k_selected_ratio: 0.25, max_seq_len: 64}
+    - {depth: 4, patch_size_in: 4,  patch_size_out: 2,  k_selected_ratio: 0.25, max_seq_len: 64}
+
+# 2. Classifier (DownstreamViTClassifier) Configuration
+classifier:
+  target_leaf_size: 16
+  embed_dim: 768 # Should generally match the encoder's output
+  depth: 6
+  num_heads: 12
+  num_classes: 1000
+
+# 3. Training Hyperparameters
+# These are adjusted for a local, single-GPU environment.
+training:
+  optimizer: "AdamW"
+  learning_rate: 0.001
+  weight_decay: 0.05
+  scheduler: "CosineAnnealingLR"
+  min_lr: 1.0e-6
+  
+  # Reduced for local training to fit on a single GPU
+  batch_size: 32 
+  
+  # Reduced for a quick test run
+  num_epochs: 5 

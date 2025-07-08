@@ -237,7 +237,7 @@ def gdt_imagenet_train_local(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
-    parser.add_argument('--config', type=str, default='config.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/gdt_vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='gdt-vit-imagenet', help='Subdirectory for saving logs and models')
@@ -261,8 +261,4 @@ if __name__ == "__main__":
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    if args.local:
-        gdt_imagenet_train_local(args, config)
-    else:
-        # This part is for SLURM DDP execution
-        gdt_imagenet_train(args, config)
+    gdt_imagenet_train_local(args, config)
