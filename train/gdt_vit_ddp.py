@@ -231,9 +231,14 @@ def gdt_imagenet_train_local(args, config):
     # 2. Create our new, proper sampler for the training set
     from dataset.imagenet import LocalEpochSampler
     train_sampler = LocalEpochSampler(train_dataset, shuffle=True)
-    dataloaders['train'].sampler = train_sampler
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=config['training']['batch_size'],
+        sampler=train_sampler,
+        num_workers=args.num_workers
+    )
 
-    train_model(mock_ddp_model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
+    train_model(mock_ddp_model, train_loader, dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
