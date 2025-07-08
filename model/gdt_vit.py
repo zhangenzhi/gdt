@@ -89,7 +89,7 @@ class AdaptiveFocusViT(nn.Module):
         # 4. 送入下游分类器
         logits = self.classifier(final_sequence)
         
-        return logits
+        return logits, final_sequence
     
 # ======================================================================
 # 模型创建函数
