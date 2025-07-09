@@ -242,10 +242,10 @@ def gdt_imagenet_train_local(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GDT-ViT Training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/gdt_vit_p8_test.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/gdt_vit_16t2_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='gdt_vit_p8_test', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='gdt_vit_16t2_test', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags
