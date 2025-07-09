@@ -17,13 +17,17 @@ from gdt.gdt import HierarchicalViTEncoder, SinusoidalPositionalEncoder
 # 下游分类器部分 (Downstream Classifier) - 负责分类
 # ======================================================================
 class DownstreamViTClassifier(nn.Module):
-    def __init__(self, *, num_tokens: int, embed_dim: int, depth: int, num_heads: int, num_classes: int, mlp_ratio=4.0, dropout=0.1):
+    def __init__(self, *, num_tokens: int, embed_dim: int, depth: int, num_heads: int, num_classes: int, patch_size_vocab: Dict[int, int], mlp_ratio=4.0, dropout=0.1):
         super().__init__()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # 相对位置编码
         self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
         # 绝对位置编码
         self.pos_encoder_absolute = SinusoidalPositionalEncoder(embed_dim)
+        # --- 关键改动: 新增尺寸编码 ---
+        self.patch_size_vocab = patch_size_vocab
+        self.size_embed = nn.Embedding(len(patch_size_vocab), embed_dim)
+        
         self.pos_drop = nn.Dropout(p=dropout)
         encoder_layer = TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=int(embed_dim*mlp_ratio), dropout=dropout, batch_first=True)
         self.transformer = TransformerEncoder(encoder_layer, num_layers=depth)
@@ -39,21 +43,28 @@ class DownstreamViTClassifier(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
             
-    def forward(self, x: torch.Tensor, coords: torch.Tensor):
+    def forward(self, x: torch.Tensor, coords: torch.Tensor, sizes: torch.Tensor):
         B = x.shape[0]
         
         # --- 关键改动: 应用混合位置编码 ---
         # 1. 添加绝对位置编码
         abs_pe = self.pos_encoder_absolute(coords)
-        x = x + abs_pe
         
-        # 2. 添加 CLS token 和相对位置编码
+        # 2. 添加尺寸编码
+        # 将尺寸值映射到词汇表索引
+        size_indices = torch.tensor([self.patch_size_vocab[s.item()] for s in sizes.flatten()], device=x.device).view(B, -1)
+        size_pe = self.size_embed(size_indices)
+        
+        # 将所有编码加到 token 上
+        x = x + abs_pe + size_pe
+        
+        # 3. 添加 CLS token 和相对位置编码
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed_relative
         x = self.pos_drop(x)
         
-        # 3. 通过 Transformer
+        # 4. 通过 Transformer
         x = self.transformer(x)
         x = self.norm(x)
         return self.head(x[:, 0])
@@ -73,36 +84,38 @@ class AdaptiveFocusViT(nn.Module):
     def forward(self, img: torch.Tensor) -> Tuple[torch.Tensor, List[Dict]]:
         B = img.shape[0]
         
-        # 1. 从编码器获取所有叶子结点
         leaf_nodes_data = self.encoder(img)
         
-        # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入，同时收集坐标
         resized_leaf_tokens = []
         leaf_coords = []
+        leaf_sizes = [] # --- 关键改动: 收集尺寸信息 ---
+
         for leaf_group in leaf_nodes_data:
             raw_patches = leaf_group['patches']
             if raw_patches.numel() == 0: continue
             
-            # --- 关键改动: 收集坐标 ---
             coords = leaf_group['coords']
             leaf_coords.append(coords)
             
             size_in = leaf_group['size']
             num_patches_in_group = raw_patches.shape[1]
-            patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
             
+            # 为当前组的所有 patch 创建尺寸张量
+            size_tensor = torch.full((B, num_patches_in_group, 1), float(size_in), device=img.device, dtype=torch.float32)
+            leaf_sizes.append(size_tensor)
+            
+            patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
             resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
             resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
             
             tokens = self.leaf_embedder(resized_flat_patches)
             resized_leaf_tokens.append(tokens)
 
-        # 3. 拼接所有叶子 token 和坐标
         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
         final_coords = torch.cat(leaf_coords, dim=1)
+        final_sizes = torch.cat(leaf_sizes, dim=1)
         
-        # 4. 送入下游分类器
-        logits = self.classifier(final_sequence, final_coords)
+        logits = self.classifier(final_sequence, final_coords, final_sizes)
         
         return logits, leaf_nodes_data
 
