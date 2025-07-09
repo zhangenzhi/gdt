@@ -20,13 +20,13 @@ class DownstreamViTClassifier(nn.Module):
     def __init__(self, *, num_tokens: int, embed_dim: int, depth: int, num_heads: int, num_classes: int, patch_size_vocab: Dict[int, int], mlp_ratio=4.0, dropout=0.1):
         super().__init__()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # 相对位置编码
-        self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
-        # 绝对位置编码
-        self.pos_encoder_absolute = SinusoidalPositionalEncoder(embed_dim)
+        # # 相对位置编码
+        # self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
+        # # 绝对位置编码
+        # self.pos_encoder_absolute = SinusoidalPositionalEncoder(embed_dim)
         # --- 关键改动: 新增尺寸编码 ---
-        self.patch_size_vocab = patch_size_vocab
-        self.size_embed = nn.Embedding(len(patch_size_vocab), embed_dim)
+        # self.patch_size_vocab = patch_size_vocab
+        # self.size_embed = nn.Embedding(len(patch_size_vocab), embed_dim)
         
         self.pos_drop = nn.Dropout(p=dropout)
         encoder_layer = TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=int(embed_dim*mlp_ratio), dropout=dropout, batch_first=True)
@@ -47,16 +47,16 @@ class DownstreamViTClassifier(nn.Module):
         B = x.shape[0]
         
         # --- 关键改动: 应用混合位置编码 ---
-        # 1. 添加绝对位置编码
-        abs_pe = self.pos_encoder_absolute(coords)
+        # # 1. 添加绝对位置编码
+        # abs_pe = self.pos_encoder_absolute(coords)
         
-        # 2. 添加尺寸编码
-        # 将尺寸值映射到词汇表索引
-        size_indices = torch.tensor([self.patch_size_vocab[s.item()] for s in sizes.flatten()], device=x.device).view(B, -1)
-        size_pe = self.size_embed(size_indices)
+        # # 2. 添加尺寸编码
+        # # 将尺寸值映射到词汇表索引
+        # size_indices = torch.tensor([self.patch_size_vocab[s.item()] for s in sizes.flatten()], device=x.device).view(B, -1)
+        # size_pe = self.size_embed(size_indices)
         
-        # 将所有编码加到 token 上
-        x = x + abs_pe + size_pe
+        # # 将所有编码加到 token 上
+        # x = x + abs_pe + size_pe
         
         # 3. 添加 CLS token 和相对位置编码
         cls_tokens = self.cls_token.expand(B, -1, -1)
