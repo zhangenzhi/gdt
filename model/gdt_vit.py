@@ -148,7 +148,12 @@ def create_gdt_cls(
     """
     num_patches_current_stage = (img_size // stages_config[0]['patch_size_in'])**2
     total_leaf_nodes = 0
-
+    
+    patch_sizes_in_stages = [s['patch_size_in'] for s in stages_config] + [stages_config[-1]['patch_size_out']]
+    unique_patch_sizes = sorted(list(set(patch_sizes_in_stages)), reverse=True)
+    patch_size_vocab = {size: i for i, size in enumerate(unique_patch_sizes)}
+    print(f"创建的尺寸词汇表: {patch_size_vocab}")
+    
     print("--- 正在根据配置计算总叶子结点数量 ---")
     for i, config in enumerate(stages_config):
         k_selected_ratio = config['k_selected_ratio']
@@ -184,7 +189,8 @@ def create_gdt_cls(
         embed_dim=classifier_embed_dim,
         depth=6,
         num_heads=12,
-        num_classes=num_classes
+        num_classes=num_classes,
+        patch_size_vocab=patch_size_vocab
     )
 
     # --- 创建顶层模型 ---
