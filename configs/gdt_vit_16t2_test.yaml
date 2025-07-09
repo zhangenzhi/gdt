@@ -33,7 +33,7 @@ training:
   min_lr: 1.0e-6
   
   # Reduced for local training to fit on a single GPU
-  batch_size: 128 
+  batch_size: 64 
   
   # Reduced for a quick test run
   num_epochs: 120 
