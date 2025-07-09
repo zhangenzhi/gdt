@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-from gdt.gdt import HierarchicalViTEncoder
+from gdt.gdt import HierarchicalViTEncoder, SinusoidalPositionalEncoder
 
 
 # ======================================================================
@@ -20,7 +20,10 @@ class DownstreamViTClassifier(nn.Module):
     def __init__(self, *, num_tokens: int, embed_dim: int, depth: int, num_heads: int, num_classes: int, mlp_ratio=4.0, dropout=0.1):
         super().__init__()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
+        # 相对位置编码
+        self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
+        # 绝对位置编码
+        self.pos_encoder_absolute = SinusoidalPositionalEncoder(embed_dim)
         self.pos_drop = nn.Dropout(p=dropout)
         encoder_layer = TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=int(embed_dim*mlp_ratio), dropout=dropout, batch_first=True)
         self.transformer = TransformerEncoder(encoder_layer, num_layers=depth)
@@ -36,12 +39,21 @@ class DownstreamViTClassifier(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
             
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, coords: torch.Tensor):
         B = x.shape[0]
+        
+        # --- 关键改动: 应用混合位置编码 ---
+        # 1. 添加绝对位置编码
+        abs_pe = self.pos_encoder_absolute(coords)
+        x = x + abs_pe
+        
+        # 2. 添加 CLS token 和相对位置编码
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.pos_embed
+        x = x + self.pos_embed_relative
         x = self.pos_drop(x)
+        
+        # 3. 通过 Transformer
         x = self.transformer(x)
         x = self.norm(x)
         return self.head(x[:, 0])
@@ -60,20 +72,38 @@ class AdaptiveFocusViT(nn.Module):
         
     def forward(self, img: torch.Tensor) -> Tuple[torch.Tensor, List[Dict]]:
         B = img.shape[0]
+        
+        # 1. 从编码器获取所有叶子结点
         leaf_nodes_data = self.encoder(img)
+        
+        # 2. 将所有叶子 patch 缩放到统一尺寸并嵌入，同时收集坐标
         resized_leaf_tokens = []
+        leaf_coords = []
         for leaf_group in leaf_nodes_data:
             raw_patches = leaf_group['patches']
             if raw_patches.numel() == 0: continue
+            
+            # --- 关键改动: 收集坐标 ---
+            coords = leaf_group['coords']
+            leaf_coords.append(coords)
+            
             size_in = leaf_group['size']
             num_patches_in_group = raw_patches.shape[1]
             patches_as_imgs = raw_patches.view(B * num_patches_in_group, self.in_channels, size_in, size_in)
+            
             resized_patches_imgs = F.interpolate(patches_as_imgs, size=(self.target_leaf_size, self.target_leaf_size), mode='bilinear', align_corners=False)
             resized_flat_patches = resized_patches_imgs.view(B, num_patches_in_group, -1)
+            
             tokens = self.leaf_embedder(resized_flat_patches)
             resized_leaf_tokens.append(tokens)
+
+        # 3. 拼接所有叶子 token 和坐标
         final_sequence = torch.cat(resized_leaf_tokens, dim=1)
-        logits = self.classifier(final_sequence)
+        final_coords = torch.cat(leaf_coords, dim=1)
+        
+        # 4. 送入下游分类器
+        logits = self.classifier(final_sequence, final_coords)
+        
         return logits, leaf_nodes_data
 
 # ======================================================================
