@@ -79,6 +79,70 @@ class VisionTransformer(nn.Module):
         # Return only logits to match standard classifier output
         return logits
 
+class RelativeAttention(nn.Module):
+    def __init__(self, dim, num_heads, max_rel_distance=128):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=False)
+        self.proj = nn.Linear(dim, dim)
+
+        self.max_rel_distance = max_rel_distance  # 假设最大距离范围
+        self.relative_bias_table = nn.Parameter(
+            torch.zeros((2 * max_rel_distance - 1) ** 2, num_heads)
+        )  # [2D distance_bucket, num_heads]
+
+        # 坐标 index 到 bias_table 的映射表
+        self.register_buffer("relative_index", self._build_relative_index(max_rel_distance))
+
+    def _build_relative_index(self, max_dist):
+        coords = torch.stack(torch.meshgrid(
+            torch.arange(max_dist), torch.arange(max_dist), indexing='ij'
+        ), dim=0)  # (2, max, max)
+
+        coords_flat = coords.reshape(2, -1)
+        rel_coords = coords_flat[:, :, None] - coords_flat[:, None, :]  # (2, N, N)
+        rel_coords = rel_coords.permute(1, 2, 0).contiguous()  # (N, N, 2)
+        rel_coords += max_dist - 1  # shift to >=0
+        rel_index = rel_coords[:, :, 0] * (2 * max_dist - 1) + rel_coords[:, :, 1]
+        return rel_index  # (N, N)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.permute(2, 0, 3, 1, 4)  # q/k/v: (B, num_heads, N, head_dim)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, N, N)
+        relative_bias = self.relative_bias_table[self.relative_index[:N, :N].reshape(-1)]
+        relative_bias = relative_bias.reshape(N, N, -1).permute(2, 0, 1)  # (num_heads, N, N)
+        attn = attn + relative_bias.unsqueeze(0)  # broadcast to (B, num_heads, N, N)
+
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        return self.proj(out)
+
+class RelativeTransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = RelativeAttention(dim, num_heads)
+
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, int(dim * mlp_ratio)),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(int(dim * mlp_ratio), dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        x = x + self.attn(self.norm1(x))
+        x = x + self.mlp(self.norm2(x))
+        return x
+
 def create_vit_model(config: Dict) -> VisionTransformer:
     """
     Factory function to create a VisionTransformer from a config dictionary.
