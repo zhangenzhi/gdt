@@ -11,7 +11,7 @@ from torchvision import transforms
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 from gdt.gdt import HierarchicalViTEncoder, SinusoidalPositionalEncoder
-from model.vit import RelativeAttention, RelativeTransformerBlock
+from model.vit import  RelativeTransformerBlock
 
 
 # ======================================================================
