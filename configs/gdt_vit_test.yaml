@@ -1,7 +1,7 @@
 # Configuration for a LOCAL training run of the AdaptiveFocusViT (GDT-ViT) Model
 
 # A name for this specific experiment run, used for creating output directories
-task_name: "gdt_vit_local_test"
+task_name: "gdt_vit_pos_test"
 
 # 1. Encoder (HierarchicalViTEncoder) Configuration
 # The model architecture is kept the same as the DDP config for a valid test.
