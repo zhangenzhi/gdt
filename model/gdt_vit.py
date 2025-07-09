@@ -21,7 +21,7 @@ class DownstreamViTClassifier(nn.Module):
         super().__init__()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # # 相对位置编码
-        # self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
+        self.pos_embed_relative = nn.Parameter(torch.zeros(1, num_tokens + 1, embed_dim))
         # # 绝对位置编码
         # self.pos_encoder_absolute = SinusoidalPositionalEncoder(embed_dim)
         # --- 关键改动: 新增尺寸编码 ---
