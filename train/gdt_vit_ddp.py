@@ -118,14 +118,14 @@ def evaluate_model(model, val_loader, device_id, args, config, is_ddp=False):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    log_dir = os.path.join(args.output, args.savefile)
-    visualize_evaluation_focus(
-        original_image=images[0],
-        leaf_nodes_data=leaf_nodes_data[0],
-        target_leaf_size=config['classifier']['target_leaf_size'],
-        img_size=args.img_size,
-        output_filename=log_dir
-    )
+    # log_dir = os.path.join(args.output, args.savefile)
+    # visualize_evaluation_focus(
+    #     original_image=images[0],
+    #     leaf_nodes_data=leaf_nodes_data[0],
+    #     target_leaf_size=config['classifier']['target_leaf_size'],
+    #     img_size=args.img_size,
+    #     output_filename=log_dir
+    # )
         
     # --- FIXED: Conditionally synchronize results across all GPUs in DDP ---
     if is_ddp:
