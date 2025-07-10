@@ -124,10 +124,10 @@ class RelativeAttention(nn.Module):
         return self.proj(out)
 
 class RelativeTransformerBlock(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1, max_rel_distance=128):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = RelativeAttention(dim, num_heads)
+        self.attn = RelativeAttention(dim, num_heads, max_rel_distance=max_rel_distance)
 
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(

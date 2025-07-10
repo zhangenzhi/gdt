@@ -12,9 +12,9 @@ encoder:
   in_channels: 3
   stages:
     - {depth: 4, patch_size_in: 32, patch_size_out: 16, k_selected_ratio: 1.0, max_seq_len: 64} # (256/32)^2 = 64
-    - {depth: 4, patch_size_in: 16, patch_size_out: 8,  k_selected_ratio: 0.25, max_seq_len: 64}
-    - {depth: 4, patch_size_in: 8,  patch_size_out: 4,  k_selected_ratio: 0.125, max_seq_len: 64}
-    - {depth: 4, patch_size_in: 4,  patch_size_out: 2,  k_selected_ratio: 0.0625, max_seq_len: 64}
+    - {depth: 4, patch_size_in: 16, patch_size_out: 8,  k_selected_ratio: 0.25, max_seq_len: 256}
+    - {depth: 4, patch_size_in: 8,  patch_size_out: 4,  k_selected_ratio: 0.125, max_seq_len: 256}
+    - {depth: 4, patch_size_in: 4,  patch_size_out: 2,  k_selected_ratio: 0.0625, max_seq_len: 128}
 
 # 2. Classifier (DownstreamViTClassifier) Configuration
 classifier:
