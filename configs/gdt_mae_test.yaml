@@ -1,0 +1,33 @@
+# Configuration for Self-Supervised PRE-TRAINING of the Hierarchical Encoder
+# using the Masked Autoencoder (MAE) objective.
+
+# A name for this specific experiment run, used for creating output directories
+task_name: "gdt_mae_pretrain_v1"
+
+# 1. Encoder (HierarchicalViTEncoder) Configuration
+encoder:
+  img_size: 256 # Input image size
+  embed_dim: 768
+  num_heads: 12
+  in_channels: 3
+  stages:
+    - {depth: 4, patch_size_in: 32, patch_size_out: 16, k_selected_ratio: 0.5, max_seq_len: 64} # (256/32)^2 = 64
+    - {depth: 4, patch_size_in: 16, patch_size_out: 8,  k_selected_ratio: 0.25, max_seq_len: 128}
+    - {depth: 4, patch_size_in: 8,  patch_size_out: 4,  k_selected_ratio: 0.125, max_seq_len: 128}
+    - {depth: 4, patch_size_in: 4,  patch_size_out: 2,  k_selected_ratio: 0.0625, max_seq_len: 64}
+
+# 2. Decoder (MAEDecoder) Configuration
+decoder:
+  embed_dim: 384 # Decoder can be lighter than the encoder
+  depth: 4
+  num_heads: 6
+
+# 3. Training Hyperparameters
+training:
+  optimizer: "AdamW"
+  learning_rate: 0.0001
+  weight_decay: 0.05
+  scheduler: "CosineAnnealingLR"
+  min_lr: 1.0e-6
+  num_epochs: 50 # Pre-training usually requires more epochs
+  batch_size: 128
