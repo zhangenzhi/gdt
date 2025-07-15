@@ -16,7 +16,8 @@ from PIL import Image, ImageDraw, ImageFont
 # 确保项目根目录在 Python 路径中
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataset.imagenet import imagenet_subloaders # 假设可以复用数据加载器
-from model.gdt_vit import SinusoidalPositionalEncoder, GumbelTopKSelector, HierarchicalViTEncoder
+from model.gdt_vit import SinusoidalPositionalEncoder, HierarchicalViTEncoder
+from gdt.gdt import GumbelTopKSelector
 
 # ======================================================================
 # MAE 解码器和顶层模型
