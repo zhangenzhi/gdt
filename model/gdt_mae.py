@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # 假设 HierarchicalViTEncoder 在 gdt_vit.py 中定义
 from gdt.gdt import HierarchicalViTEncoder, SinusoidalPositionalEncoder
+from model.vit import  RelativeTransformerBlock
 
 # ======================================================================
 # MAE 解码器和顶层模型
