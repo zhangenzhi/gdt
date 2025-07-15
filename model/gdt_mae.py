@@ -1,23 +1,13 @@
-import os
-import sys
-import yaml
-import logging
-import argparse
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import math
 from typing import List, Dict, Tuple
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
 from PIL import Image, ImageDraw, ImageFont
 
-# 确保项目根目录在 Python 路径中
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dataset.imagenet import imagenet_subloaders # 假设可以复用数据加载器
-from model.gdt_vit import SinusoidalPositionalEncoder, HierarchicalViTEncoder
-from gdt.gdt import GumbelTopKSelector
+# 假设 HierarchicalViTEncoder 在 gdt_vit.py 中定义
+from gdt.gdt import HierarchicalViTEncoder, SinusoidalPositionalEncoder
 
 # ======================================================================
 # MAE 解码器和顶层模型
@@ -96,13 +86,51 @@ class HierarchicalMAE(nn.Module):
         return loss, reconstructed_patches_all, visible_indices
 
 # ======================================================================
-# 可视化函数
+# 模型创建和可视化函数
 # ======================================================================
+
+def create_gdt_mae(config: Dict) -> HierarchicalMAE:
+    """
+    一个用于创建 HierarchicalMAE 模型的工厂函数。
+    """
+    encoder_cfg = config['encoder']
+    decoder_cfg = config['decoder']
+    initial_patch_size = encoder_cfg['stages'][0]['patch_size_in']
+    num_initial_patches = (encoder_cfg['img_size'] // initial_patch_size)**2
+
+    encoder = HierarchicalViTEncoder(
+        img_size=encoder_cfg['img_size'], 
+        stages_config=encoder_cfg['stages'], 
+        embed_dim=encoder_cfg['embed_dim'], 
+        num_heads=encoder_cfg['num_heads'], 
+        in_channels=encoder_cfg['in_channels']
+    )
+    
+    decoder = MAEDecoder(
+        encoder_embed_dim=encoder_cfg['embed_dim'],
+        decoder_embed_dim=decoder_cfg['embed_dim'],
+        depth=decoder_cfg['depth'],
+        num_heads=decoder_cfg['num_heads'],
+        num_patches=num_initial_patches,
+        patch_size=initial_patch_size,
+        in_channels=encoder_cfg['in_channels']
+    )
+    
+    model = HierarchicalMAE(encoder, decoder)
+    return model
+
 def visualize_reconstruction(img_tensor: torch.Tensor, recon_patches: torch.Tensor, visible_indices: torch.Tensor, initial_patch_size: int, output_filename: str):
+    """生成并保存重建的可视化图像。"""
     print("开始生成重建可视化图像...")
     
     # 将输入 tensor 转换为 PIL Image
-    original_img = transforms.ToPILImage()(img_tensor[0].cpu())
+    # 假设输入 tensor 是标准化的，我们需要逆标准化
+    inv_normalize = transforms.Normalize(
+       mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225],
+       std=[1/0.229, 1/0.224, 1/0.225]
+    )
+    original_img_tensor = inv_normalize(img_tensor[0].cpu())
+    original_img = transforms.ToPILImage()(original_img_tensor.clamp(0, 1))
     img_size = original_img.size
     
     # 1. 重建图片
