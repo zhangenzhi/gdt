@@ -166,7 +166,7 @@ if TRANSFORMER_ENGINE_AVAILABLE:
             # 使用Transformer Engine的LayerNorm
             self.norm1 = te.LayerNorm(dim)
             # 使用Transformer Engine的MultiheadAttention，它内部自动使用FP8优化
-            self.attn = te.MultiheadAttention(dim, num_heads, attention_dropout=dropout, self_attn=True)
+            self.attn = te.MultiheadAttention(dim, num_heads, attention_dropout=dropout)
             self.norm2 = te.LayerNorm(dim)
             # MLP中的Linear层也使用Transformer Engine的版本
             self.mlp = nn.Sequential(
