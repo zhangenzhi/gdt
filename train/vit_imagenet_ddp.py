@@ -243,7 +243,11 @@ def train_on_single(args, config):
     args.batch_size = config['training']['batch_size']
     
     # 注意：imagenet_distribute 内部也需要能处理 device='cpu' 的情况
-    dataloaders = imagenet_distribute(args=args, device=device) # 假设该函数可以接受device参数
+    dataloaders = imagenet_distribute(
+    img_size=args.img_size,
+    data_dir=args.data_dir,
+    batch_size=args.batch_size,
+    num_workers=args.num_workers)
     
     model = create_vit_model(config).to(device)
     

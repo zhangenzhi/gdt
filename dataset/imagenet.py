@@ -2,6 +2,7 @@ import argparse
 import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Sampler
+from torch.utils.data.distributed import DistributedSampler
 
 import os
 import random
@@ -43,8 +44,12 @@ def imagenet(args):
                    for x in ['train', 'val']}
     return dataloaders
 
-def imagenet_distribute(img_size, data_dir, batch_size):
-    # Define data transformations
+# 建议将 num_workers 作为参数传入，而不是依赖外部的 args
+def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
+    """
+    为分布式训练优化的ImageNet DataLoader函数
+    """
+    # 数据增强部分保持不变
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(img_size),
@@ -60,16 +65,34 @@ def imagenet_distribute(img_size, data_dir, batch_size):
         ]),
     }
 
-    # Create datasets
+    # 创建数据集
     image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=data_transforms[x])
                       for x in ['train', 'val']}
-    sampler = {x:torch.utils.data.distributed.DistributedSampler(image_datasets[x]) for x in ['train', 'val']}
+                      
+    # 为训练集和验证集创建分布式采样器
+    samplers = {x: DistributedSampler(image_datasets[x], shuffle=True) for x in ['train', 'val']}
+    # 注意：DistributedSampler 默认会打乱数据，所以DataLoader的shuffle参数必须为False。
 
-    # Create data loaders
-    dataloaders = {x: DataLoader(image_datasets[x], batch_size=batch_size,
-                                #  num_workers=args.num_workers, 
-                                 pin_memory=False, sampler=sampler[x])
-                   for x in ['train', 'val']}
+    # 创建优化后的DataLoaders
+    dataloaders = {
+        'train': DataLoader(
+            image_datasets['train'],
+            batch_size=batch_size,
+            num_workers=num_workers,      # 优化点 1: 启用多进程加载
+            pin_memory=True,              # 优化点 2: 加速CPU到GPU的数据传输
+            sampler=samplers['train'],
+            drop_last=True                # 优化点 3: 避免分布式训练中的同步问题
+        ),
+        'val': DataLoader(
+            image_datasets['val'],
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            sampler=samplers['val']
+            # 验证集通常不需要 drop_last=True
+        )
+    }
+    
     return dataloaders
     
 
