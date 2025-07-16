@@ -212,12 +212,17 @@ if TRANSFORMER_ENGINE_AVAILABLE:
             self.apply(self._init_weights)
 
         def _init_weights(self, m):
-            # 权重初始化逻辑保持相似
-            if isinstance(m, nn.Linear) or isinstance(m, te.Linear):
+            if isinstance(m, nn.Linear):
+                # 标准PyTorch线性层初始化
                 torch.nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.LayerNorm) or isinstance(m, te.LayerNorm):
+            elif isinstance(m, te.Linear):
+                # Transformer Engine的线性层不需要手动初始化
+                # 它会自动使用FP16-friendly的初始化方案
+                pass
+            elif isinstance(m, (nn.LayerNorm, te.LayerNorm)):
+                # 层归一化初始化保持不变
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
 
