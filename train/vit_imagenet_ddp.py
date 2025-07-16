@@ -120,7 +120,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
-
+        
 # 确保导入了 transformer_engine
 try:
     import transformer_engine.pytorch as te
@@ -308,6 +308,9 @@ def train_on_single(args, config):
 
     dist.destroy_process_group()
 
+# ==============================================================================
+# FP8 优化的训练函数
+# ==============================================================================
 import transformer_engine.pytorch as te
 from transformer_engine.common import recipe
 def train_vit_model_fp8(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
@@ -422,4 +425,4 @@ if __name__ == "__main__":
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    train_on_single(args, config)
+    train_vit_model_fp8(args, config)
