@@ -105,8 +105,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             model, 
             val_loader, 
             device_id, 
-            is_ddp=is_ddp, 
-            use_fp8=use_fp8_flag
+            is_ddp=is_ddp
         )
                 
         if is_main_process:
@@ -120,15 +119,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
-        
-# 确保导入了 transformer_engine
-try:
-    import transformer_engine.pytorch as te
-    TRANSFORMER_ENGINE_AVAILABLE = True
-except ImportError:
-    TRANSFORMER_ENGINE_AVAILABLE = False
 
-def evaluate_model_compatible(model, val_loader, device_id, is_ddp=False, use_fp8=False):
+def evaluate_model_compatible(model, val_loader, device_id, is_ddp=False):
     """
     一个兼容标准、混合精度和FP8模型的评估函数。
     """
@@ -139,16 +131,7 @@ def evaluate_model_compatible(model, val_loader, device_id, is_ddp=False, use_fp
     # 在评估时禁用梯度计算，以节省显存和计算
     with torch.no_grad():
         # 根据是否使用FP8，选择不同的autocast上下文
-        autocast_context = None
-        if use_fp8:
-            if not TRANSFORMER_ENGINE_AVAILABLE:
-                raise ImportError("请求使用FP8进行评估，但Transformer Engine未安装。")
-            # 使用Transformer Engine的FP8上下文
-            autocast_context = te.fp8_autocast(enabled=True)
-        else:
-            # 对于标准或BF16/FP16模型，使用PyTorch原生的autocast
-            # 注意: 这里的dtype应该与训练时匹配，例如 torch.bfloat16
-            autocast_context = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=True)
+        autocast_context = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=True)
 
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
@@ -304,97 +287,9 @@ def train_on_single(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
     
-    # train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
-    train_vit_model_fp8(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
-# ==============================================================================
-# FP8 优化的训练函数
-# ==============================================================================
-import transformer_engine.pytorch as te
-from transformer_engine.common import recipe
-def train_vit_model_fp8(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
-    """
-    为FP8优化的ViT模型设计的主训练循环。
-    """
-    # 1. 不再需要 GradScaler
-    # scaler = GradScaler(...)
-
-    best_val_acc = 0.0
-    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
-    is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
-
-    if is_main_process:
-        logging.info("开始ViT训练，共 %d 个epoch (使用FP8优化)...", num_epochs)
-
-    # 2. 定义FP8训练的"配方"
-    #    E4M3是前向传播的格式, HYBRID是反向传播的格式, 这是H100的推荐默认值。
-    fp8_recipe = recipe.DelayedScaling(
-        margin=0, interval=1, fp8_format=recipe.Format.E4M3
-    )
-
-    for epoch in range(num_epochs):
-        if is_ddp:
-            train_loader.sampler.set_epoch(epoch)
-        
-        model.train()
-        running_loss, running_corrects, running_total = 0.0, 0, 0
-        
-        for i, (images, labels) in enumerate(train_loader):
-            images = images.to(device_id, non_blocking=True)
-            labels = labels.to(device_id, non_blocking=True)
-            
-            # 恢复标准的梯度清零
-            optimizer.zero_grad()
-            
-            # 3. 使用 Transformer Engine 的 fp8_autocast 上下文管理器
-            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-
-            # 4. 恢复标准的后向传播和优化器更新
-            loss.backward()
-            optimizer.step()
-
-            # --- 之后的评估逻辑保持不变 ---
-            _, predicted = torch.max(outputs.data, 1)
-            running_total += labels.size(0)
-            running_corrects += (predicted == labels).sum().item()
-            running_loss += loss.item()
-
-            if (i + 1) % 10 == 0 and is_main_process:
-                train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
-                avg_loss = running_loss / 10
-                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}]  Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
-                running_loss, running_corrects, running_total = 0.0, 0, 0
-                
-        scheduler.step()
-        
-        # 注意：您的评估函数(evaluate_baseline_model)内部也应该使用 fp8_autocast
-        # 以确保数据类型一致并获得加速，但评估时不需要梯度计算。
-                # 从您的模型配置中获取use_fp8标志
-        model_config = config.get('model', {})
-        use_fp8_flag = model_config.get('use_fp8', False)
-
-        # 调用兼容性更强的评估函数
-        val_acc = evaluate_model_compatible(
-            model, 
-            val_loader, 
-            device_id, 
-            is_ddp=is_ddp, 
-            use_fp8=use_fp8_flag
-        )
-        
-        if is_main_process:
-            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                logging.info(f"新的最佳验证精度: {best_val_acc:.4f}. 保存模型至 {checkpoint_path}")
-                model_to_save = model.module if is_ddp else model
-                torch.save(model_to_save.state_dict(), checkpoint_path)
-
-    if is_main_process:
-        logging.info(f'训练完成。最佳验证精度: {best_val_acc:.4f}')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT Training Script")
@@ -403,7 +298,7 @@ if __name__ == "__main__":
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     # parser.add_argument('--savefile', type=str, default='vit-b-16', help='Subdirectory for saving logs and models')
-    parser.add_argument('--savefile', type=str, default='vit-b-16-fp8', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='vit-b-16-2', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
