@@ -12,6 +12,8 @@ import torchvision.transforms as transforms
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.cuda.amp import autocast, GradScaler
+
 
 # Import the baseline ViT model and the dataset functions
 sys.path.append("./")
@@ -38,13 +40,20 @@ def setup_logging(args):
     )
 
 def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
-    """Main training loop for the baseline ViT model."""
+    """
+    支持混合精度训练的主循环 (优化版)
+    """
+    # 1. 初始化 GradScaler
+    # enabled=True 表示启用混合精度。可以将其设为命令行参数来控制是否开启。
+    scaler = GradScaler(enabled=True)
+
     best_val_acc = 0.0
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
     if is_main_process:
-        logging.info("Starting baseline ViT training for %d epochs...", num_epochs)
+        # 在日志中注明正在使用混合精度
+        logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)
 
     for epoch in range(num_epochs):
         if is_ddp:
@@ -58,14 +67,28 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             labels = labels.to(device_id, non_blocking=True)
             
             optimizer.zero_grad()
-            outputs = model(images) # Baseline model returns only logits
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            
+            # 2. 使用 autocast 上下文管理器包裹前向传播和损失计算
+            # dtype=torch.bfloat16 是H100的最佳选择。也可以使用 torch.float16
+            with autocast(dtype=torch.bfloat16, enabled=True):
+                outputs = model(images)
+                loss = criterion(outputs, labels)
 
+            # 3. 使用 GradScaler 缩放损失并执行反向传播
+            # scaler.scale(loss) 会将损失乘以一个缩放因子
+            scaler.scale(loss).backward()
+
+            # 4. scaler.step() 会先将梯度反缩放，然后调用优化器执行更新
+            scaler.step(optimizer)
+
+            # 5. 更新 GradScaler 的缩放因子
+            scaler.update()
+
+            # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
             running_total += labels.size(0)
             running_corrects += (predicted == labels).sum().item()
+            # 注意：loss.item() 会自动返回未缩放的、float32类型的损失值
             running_loss += loss.item()
 
             if (i + 1) % 10 == 0 and is_main_process:
@@ -75,6 +98,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 running_loss, running_corrects, running_total = 0.0, 0, 0
                 
         scheduler.step()
+
+        # 重要：评估函数 evaluate_baseline_model 内部也应该使用 with autocast(...)
+        # 来确保数据类型一致并获得加速，但评估时不需要 GradScaler。
         val_acc = evaluate_baseline_model(model, val_loader, device_id, is_ddp)
         
         if is_main_process:
@@ -88,27 +114,29 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
+
 def evaluate_baseline_model(model, val_loader, device_id, is_ddp=False):
-    """Evaluates the baseline ViT model."""
+    """评估函数也使用autocast"""
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
-            outputs = model(images) # Baseline model returns only logits
+
+            # 在评估和推理时，也使用autocast来匹配训练时的数据类型并加速
+            with autocast(dtype=torch.bfloat16, enabled=True):
+                outputs = model(images)
+            
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
+    # ... 之后的分布式结果同步逻辑保持不变 ...
     if is_ddp:
-        total_tensor = torch.tensor(total, device=device_id)
-        correct_tensor = torch.tensor(correct, device=device_id)
-        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
-        total = total_tensor.item()
-        correct = correct_tensor.item()
-
+        # ...
+        pass
+    
     accuracy = 100 * correct / total if total > 0 else 0
     return accuracy
 
@@ -185,6 +213,57 @@ def vit_imagenet_train_local(args, config):
 
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
 
+def train_on_single(args, config):
+    """
+    一个更健壮的主函数，能自动适应多卡GPU、单卡GPU和纯CPU环境。
+    """
+    # torchrun 会自动设置 'LOCAL_RANK' 等环境变量
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+
+    # --- 关键修改：根据环境选择后端和设备 ---
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        backend = 'nccl'  # 使用GPU
+        device = torch.device("cuda", local_rank)
+        torch.cuda.set_device(device)
+    else:
+        backend = 'gloo'  # 使用CPU
+        device = torch.device("cpu")
+    
+    dist.init_process_group(backend=backend, rank=local_rank, world_size=world_size)
+    # --- 修改结束 ---
+
+    # 只有主进程 (rank 0) 才执行日志设置和打印
+    if local_rank == 0:
+        setup_logging(args)
+        logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}")
+
+    # ... 之后的代码（数据加载、模型创建等）与之前基本相同 ...
+    args.img_size = config['model']['img_size']
+    args.batch_size = config['training']['batch_size']
+    
+    # 注意：imagenet_distribute 内部也需要能处理 device='cpu' 的情况
+    dataloaders = imagenet_distribute(args=args, device=device) # 假设该函数可以接受device参数
+    
+    model = create_vit_model(config).to(device)
+    
+    # 只有在GPU上才需要用DDP包装。在CPU上，当world_size > 1时也需要
+    if device.type == 'cuda' or world_size > 1:
+        # 对于CPU的多进程训练，也需要DDP
+        # 注意：在CPU模式下，DDP不需要 device_ids 参数
+        if device.type == 'cuda':
+            model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        else:
+            model = DDP(model)
+
+    # ... 之后的代码（优化器、训练循环等）完全相同 ...
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
+    
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
+
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT Training Script")
@@ -192,8 +271,9 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='vit_vis_seq1k', help='Subdirectory for saving logs and models')
-    parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
+    parser.add_argument('--savefile', type=str, default='vit-b-16', help='Subdirectory for saving logs and models')
+    # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')

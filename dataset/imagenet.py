@@ -39,7 +39,7 @@ def imagenet(args):
     shuffle = True
     pin_memory  = True
     dataloaders = {x: DataLoader(image_datasets[x], batch_size=args.batch_size, shuffle=shuffle, 
-                                 num_workers=args.num_workers,pin_memory=pin_memory)
+                                 num_workers=args.num_workers, pin_memory=pin_memory)
                    for x in ['train', 'val']}
     return dataloaders
 
@@ -209,16 +209,21 @@ def parse_args():
     return args    
 
 if __name__ == "__main__":
-    args = parse_args()
+    # 假设 args 已经通过某个函数（如 parse_args()）正确设置
+    args = parse_args() 
+    
     dataloaders = imagenet(args)
-    # Example usage:
-    # Iterate through the dataloaders
+    
     import time
     start_time = time.time()
     for phase in ['train', 'val']:
-        for step, inputs, labels in enumerate(dataloaders[phase]):
-            if step%500==0:
-                print(step)
+        # --- 这是修改后的正确代码行 ---
+        for step, (inputs, labels) in enumerate(dataloaders[phase]):
+            # 现在，step, inputs, 和 labels 都有了正确的值
+            if step % 500 == 0:
+                # 为了验证，可以打印出变量的类型和形状
+                print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+
     print("Time cost for loading {}".format(time.time() - start_time))
 
 # if __name__ == '__main__':
