@@ -304,8 +304,8 @@ def train_on_single(args, config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
     
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
-
+    # train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
+    train_vit_model_fp8(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
 # ==============================================================================
@@ -425,4 +425,4 @@ if __name__ == "__main__":
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    train_vit_model_fp8(args, config)
+    train_on_single(args, config)
