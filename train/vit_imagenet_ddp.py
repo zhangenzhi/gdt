@@ -330,7 +330,7 @@ def train_vit_model_fp8(model, train_loader, val_loader, criterion, optimizer, s
     # 2. 定义FP8训练的"配方"
     #    E4M3是前向传播的格式, HYBRID是反向传播的格式, 这是H100的推荐默认值。
     fp8_recipe = recipe.DelayedScaling(
-        margin=0, interval=1, fp8_format=recipe.Format.HYBRID
+        margin=0, interval=1, fp8_format=recipe.Format.E4M3
     )
 
     for epoch in range(num_epochs):
