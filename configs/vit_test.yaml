@@ -12,7 +12,7 @@ model:
   depth: 6
   num_heads: 12
   mlp_ratio: 4.0
-  num_classes: 10
+  num_classes: 1000
 
 # 2. Training Hyperparameters
 training:
