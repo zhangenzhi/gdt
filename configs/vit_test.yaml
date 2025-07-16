@@ -23,4 +23,4 @@ training:
   scheduler: "CosineAnnealingLR"
   min_lr: 1.0e-6
   num_epochs: 120
-  batch_size: 512 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
+  batch_size: 256 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
