@@ -272,7 +272,12 @@ def train_on_single(args, config):
     num_workers=args.num_workers)
     
     model = create_vit_model(config).to(device)
-    
+    # *** 加速优化 1: torch.compile ***
+    if config['training'].get('use_compile', False):
+        if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
+        # 必须在DDP包装之前进行编译
+        model = torch.compile(model)
+        
     # 只有在GPU上才需要用DDP包装。在CPU上，当world_size > 1时也需要
     if device.type == 'cuda' or world_size > 1:
         # 对于CPU的多进程训练，也需要DDP
@@ -284,7 +289,15 @@ def train_on_single(args, config):
 
     # ... 之后的代码（优化器、训练循环等）完全相同 ...
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    # *** 加速优化 2: Fused Optimizer ***
+    use_fused = config['training'].get('use_fused_optimizer', False)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=config['training']['learning_rate'], 
+        weight_decay=config['training']['weight_decay'],
+        fused=use_fused # 在CUDA上可用时自动启用融合内核
+    )
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
     
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
@@ -298,7 +311,7 @@ if __name__ == "__main__":
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     # parser.add_argument('--savefile', type=str, default='vit-b-16', help='Subdirectory for saving logs and models')
-    parser.add_argument('--savefile', type=str, default='vit-b-16-2', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='vit-b-16-opt', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
