@@ -42,7 +42,7 @@ def setup_logging(args):
 def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
     # 1. 初始化 GradScaler
     # enabled=True 表示启用混合精度。可以将其设为命令行参数来控制是否开启。
-    scaler = GradScaler(device_type='cuda', enabled=True)
+    scaler = GradScaler(enabled=True)
 
     best_val_acc = 0.0
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
