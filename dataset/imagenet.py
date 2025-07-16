@@ -208,69 +208,69 @@ def parse_args():
     args = parser.parse_args()
     return args    
 
-# if __name__ == "__main__":
-#     args = parse_args()
-#     dataloaders = imagenet(args)
-#     # Example usage:
-#     # Iterate through the dataloaders
-#     import time
-#     start_time = time.time()
-#     for phase in ['train', 'val']:
-#         for step, inputs, labels in enumerate(dataloaders[phase]):
-#             if step%500==0:
-#                 print(step)
-#     print("Time cost for loading {}".format(time.time() - start_time))
+if __name__ == "__main__":
+    args = parse_args()
+    dataloaders = imagenet(args)
+    # Example usage:
+    # Iterate through the dataloaders
+    import time
+    start_time = time.time()
+    for phase in ['train', 'val']:
+        for step, inputs, labels in enumerate(dataloaders[phase]):
+            if step%500==0:
+                print(step)
+    print("Time cost for loading {}".format(time.time() - start_time))
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
-    parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
-    parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
-    parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
-    parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
-    parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
+#     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
+#     parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
+#     parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
+#     parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
+#     parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
     
-    args = parser.parse_args()
+#     args = parser.parse_args()
 
-    # --- Create Training Subset ---
-    print("--- Starting Training Subset Creation ---")
-    original_train_dir = os.path.join(args.data_dir, 'train')
-    subset_train_dir = os.path.join(args.output_dir, 'train')
-    create_imagenet_subset(original_train_dir, subset_train_dir, args.num_classes, args.train_imgs)
+#     # --- Create Training Subset ---
+#     print("--- Starting Training Subset Creation ---")
+#     original_train_dir = os.path.join(args.data_dir, 'train')
+#     subset_train_dir = os.path.join(args.output_dir, 'train')
+#     create_imagenet_subset(original_train_dir, subset_train_dir, args.num_classes, args.train_imgs)
 
-    # --- Create Validation Subset from the same classes ---
-    print("\n--- Starting Validation Subset Creation ---")
-    # Get the classes selected for the training set to ensure consistency
-    selected_train_classes = os.listdir(subset_train_dir)
-    original_val_dir = os.path.join(args.data_dir, 'val')
-    subset_val_dir = os.path.join(args.output_dir, 'val')
+#     # --- Create Validation Subset from the same classes ---
+#     print("\n--- Starting Validation Subset Creation ---")
+#     # Get the classes selected for the training set to ensure consistency
+#     selected_train_classes = os.listdir(subset_train_dir)
+#     original_val_dir = os.path.join(args.data_dir, 'val')
+#     subset_val_dir = os.path.join(args.output_dir, 'val')
     
-    if os.path.exists(subset_val_dir):
-        shutil.rmtree(subset_val_dir)
-    os.makedirs(subset_val_dir)
+#     if os.path.exists(subset_val_dir):
+#         shutil.rmtree(subset_val_dir)
+#     os.makedirs(subset_val_dir)
     
-    for class_name in tqdm(selected_train_classes, desc="Processing validation classes"):
-        subset_class_dir = os.path.join(subset_val_dir, class_name)
-        os.makedirs(subset_class_dir)
+#     for class_name in tqdm(selected_train_classes, desc="Processing validation classes"):
+#         subset_class_dir = os.path.join(subset_val_dir, class_name)
+#         os.makedirs(subset_class_dir)
         
-        original_class_dir = os.path.join(original_val_dir, class_name)
-        if not os.path.isdir(original_class_dir):
-            # print(f"Warning: Class '{class_name}' not found in validation set. Skipping.")
-            continue
+#         original_class_dir = os.path.join(original_val_dir, class_name)
+#         if not os.path.isdir(original_class_dir):
+#             # print(f"Warning: Class '{class_name}' not found in validation set. Skipping.")
+#             continue
             
-        class_images = [f for f in os.listdir(original_class_dir) if os.path.isfile(os.path.join(original_class_dir, f))]
-        k_images = min(args.val_imgs, len(class_images))
-        if k_images == 0:
-            continue
+#         class_images = [f for f in os.listdir(original_class_dir) if os.path.isfile(os.path.join(original_class_dir, f))]
+#         k_images = min(args.val_imgs, len(class_images))
+#         if k_images == 0:
+#             continue
         
-        selected_images = random.sample(class_images, k=k_images)
+#         selected_images = random.sample(class_images, k=k_images)
         
-        for image_name in selected_images:
-            original_image_path = os.path.join(original_class_dir, image_name)
-            subset_image_path = os.path.join(subset_class_dir, image_name)
-            shutil.copy(original_image_path, subset_image_path)
+#         for image_name in selected_images:
+#             original_image_path = os.path.join(original_class_dir, image_name)
+#             subset_image_path = os.path.join(subset_class_dir, image_name)
+#             shutil.copy(original_image_path, subset_image_path)
             
-    print("\nValidation subset creation completed.")
-    print("Subset creation finished. Find your data at:", args.output_dir)
+#     print("\nValidation subset creation completed.")
+#     print("Subset creation finished. Find your data at:", args.output_dir)
     
 # if __name__ == '__main__':
 #     # --- Example Usage ---
