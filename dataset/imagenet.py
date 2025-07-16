@@ -204,7 +204,7 @@ if __name__ == "__main__":
     # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader')
+    parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader')
     parser.add_argument('--num_workers', type=int, default=48, help='Number of workers for DataLoader')
     
     args = parser.parse_args()
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     start_time = time.time()
     for phase in ['train', 'val']:
         for step, (inputs, labels) in enumerate(dataloaders[phase]):
-            if step % 1000 == 0:
+            if step % 100 == 0:
                 # 为了验证，可以打印出变量的类型和形状
                 print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
