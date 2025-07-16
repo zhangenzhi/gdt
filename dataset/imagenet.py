@@ -195,32 +195,27 @@ def imagenet_iter(args):
                 if step%1000==0:
                     print(step)
         print("Time cost for loading {}".format(time.time() - start_time))
+           
 
-def parse_args():
+if __name__ == "__main__":
+    # 假设 args 已经通过某个函数（如 parse_args()）正确设置
     parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=10, help='Number of workers for DataLoader')
+    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=48, help='Number of workers for DataLoader')
     
     args = parser.parse_args()
-    return args    
-
-if __name__ == "__main__":
-    # 假设 args 已经通过某个函数（如 parse_args()）正确设置
-    args = parse_args() 
     
     dataloaders = imagenet(args)
     
     import time
     start_time = time.time()
     for phase in ['train', 'val']:
-        # --- 这是修改后的正确代码行 ---
         for step, (inputs, labels) in enumerate(dataloaders[phase]):
-            # 现在，step, inputs, 和 labels 都有了正确的值
-            if step % 500 == 0:
+            if step % 1000 == 0:
                 # 为了验证，可以打印出变量的类型和形状
                 print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
@@ -228,8 +223,10 @@ if __name__ == "__main__":
 
 # if __name__ == '__main__':
 #     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
-#     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
-#     parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
+#     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
+#     # parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
+#     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
+#     parser.add_argument('--output_dir', type=str, default="/work/c30636/gdt/dataset", help="Path to save the generated subset.")
 #     parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
 #     parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
 #     parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
