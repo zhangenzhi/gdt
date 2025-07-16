@@ -293,4 +293,4 @@ if __name__ == "__main__":
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    vit_imagenet_train_local(args, config)
+    train_on_single(args, config)
