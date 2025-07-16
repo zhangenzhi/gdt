@@ -200,7 +200,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
-    parser.add_argument('--data_dir', type=str, default='/Volumes/Extreme/dataset/imagenet', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for DataLoader')
     parser.add_argument('--num_workers', type=int, default=10, help='Number of workers for DataLoader')
