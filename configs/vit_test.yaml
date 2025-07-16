@@ -5,6 +5,7 @@ task_name: "vit_imagenet_local_test"
 
 # 1. Model Architecture Configuration
 model:
+  use_fp8: True
   img_size: 256
   patch_size: 16
   in_channels: 3

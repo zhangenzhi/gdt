@@ -143,6 +143,103 @@ class RelativeTransformerBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
+# ==============================================================================
+# 全新的FP8优化版Vision Transformer
+# ==============================================================================
+# 导入Transformer Engine，这是实现FP8训练的关键
+try:
+    import transformer_engine.pytorch as te
+    from transformer_engine.common import recipe
+    TRANSFORMER_ENGINE_AVAILABLE = True
+except ImportError:
+    print("警告: Transformer Engine未安装。FP8优化模型将不可用。")
+    TRANSFORMER_ENGINE_AVAILABLE = False
+    
+if TRANSFORMER_ENGINE_AVAILABLE:
+    class TransformerBlockFP8(nn.Module):
+        """
+        使用Transformer Engine的FP8优化版Transformer块。
+        它替代了 nn.TransformerEncoderLayer。
+        """
+        def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1):
+            super().__init__()
+            # 使用Transformer Engine的LayerNorm
+            self.norm1 = te.LayerNorm(dim)
+            # 使用Transformer Engine的MultiheadAttention，它内部自动使用FP8优化
+            self.attn = te.MultiheadAttention(dim, num_heads, attention_dropout=dropout, self_attn=True)
+            self.norm2 = te.LayerNorm(dim)
+            # MLP中的Linear层也使用Transformer Engine的版本
+            self.mlp = nn.Sequential(
+                te.Linear(dim, int(dim * mlp_ratio)),
+                nn.GELU(), # GELU在TE中没有对应模块，继续使用PyTorch版本
+                nn.Dropout(dropout),
+                te.Linear(int(dim * mlp_ratio), dim),
+                nn.Dropout(dropout)
+            )
+
+        def forward(self, x):
+            # 保持Pre-LN (层归一化前置)的结构
+            x = x + self.attn(self.norm1(x))
+            x = x + self.mlp(self.norm2(x))
+            return x
+
+    class VisionTransformerFP8(nn.Module):
+        """为FP8训练优化的Vision Transformer。"""
+        def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
+            super().__init__()
+            self.embed_dim = embed_dim
+            self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
+            num_patches = self.patch_embed.num_patches
+
+            # 特殊tokens (保持不变)
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+            self.pos_drop = nn.Dropout(p=dropout)
+
+            # Transformer编码器: 替换为FP8优化块的列表
+            self.blocks = nn.ModuleList([
+                TransformerBlockFP8(
+                    dim=embed_dim, 
+                    num_heads=num_heads, 
+                    mlp_ratio=mlp_ratio, 
+                    dropout=dropout
+                ) for _ in range(depth)])
+
+            # 分类头 (使用TE的模块)
+            self.norm = te.LayerNorm(embed_dim)
+            self.head = te.Linear(embed_dim, num_classes)
+
+            self.apply(self._init_weights)
+
+        def _init_weights(self, m):
+            # 权重初始化逻辑保持相似
+            if isinstance(m, nn.Linear) or isinstance(m, te.Linear):
+                torch.nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.LayerNorm) or isinstance(m, te.LayerNorm):
+                nn.init.constant_(m.bias, 0)
+                nn.init.constant_(m.weight, 1.0)
+
+        def forward(self, x):
+            B = x.shape[0]
+            x = self.patch_embed(x)
+
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = x + self.pos_embed
+            x = self.pos_drop(x)
+
+            # 依次通过所有FP8优化块
+            for blk in self.blocks:
+                x = blk(x)
+            
+            # 提取CLS token用于分类
+            cls_output = self.norm(x[:, 0])
+            logits = self.head(cls_output)
+            
+            return logits
+        
 def create_vit_model(config: Dict) -> VisionTransformer:
     """
     Factory function to create a VisionTransformer from a config dictionary.
@@ -157,5 +254,34 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes']
+    )
+    return model
+
+def create_vit_model(config: Dict) -> nn.Module:
+    """
+    根据配置字典创建ViT模型的工厂函数。
+    """
+    model_config = config['model']
+    use_fp8 = model_config.get('use_fp8', False)
+
+    if use_fp8:
+        if not TRANSFORMER_ENGINE_AVAILABLE:
+            raise ImportError("配置请求使用FP8，但Transformer Engine未安装。")
+        print("正在创建 FP8 优化版的 VisionTransformer...")
+        model_class = VisionTransformerFP8
+    else:
+        print("正在创建标准版的 VisionTransformer...")
+        model_class = VisionTransformer
+
+    model = model_class(
+        img_size=model_config.get('img_size', 256),
+        patch_size=model_config.get('patch_size', 16),
+        in_channels=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        num_classes=model_config['num_classes'],
+        dropout=model_config.get('dropout', 0.1)
     )
     return model

@@ -12,7 +12,7 @@ import torchvision.transforms as transforms
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import GradScaler, autocast 
 
 
 # Import the baseline ViT model and the dataset functions
@@ -40,12 +40,9 @@ def setup_logging(args):
     )
 
 def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
-    """
-    支持混合精度训练的主循环 (优化版)
-    """
     # 1. 初始化 GradScaler
     # enabled=True 表示启用混合精度。可以将其设为命令行参数来控制是否开启。
-    scaler = GradScaler(enabled=True)
+    scaler = GradScaler(device_type='cuda', enabled=True)
 
     best_val_acc = 0.0
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
@@ -70,7 +67,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             
             # 2. 使用 autocast 上下文管理器包裹前向传播和损失计算
             # dtype=torch.bfloat16 是H100的最佳选择。也可以使用 torch.float16
-            with autocast(dtype=torch.bfloat16, enabled=True):
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
                 outputs = model(images)
                 loss = criterion(outputs, labels)
 
@@ -99,10 +96,19 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 
         scheduler.step()
 
-        # 重要：评估函数 evaluate_baseline_model 内部也应该使用 with autocast(...)
-        # 来确保数据类型一致并获得加速，但评估时不需要 GradScaler。
-        val_acc = evaluate_baseline_model(model, val_loader, device_id, is_ddp)
-        
+        # 从您的模型配置中获取use_fp8标志
+        model_config = config.get('model', {})
+        use_fp8_flag = model_config.get('use_fp8', False)
+
+        # 调用兼容性更强的评估函数
+        val_acc = evaluate_model_compatible(
+            model, 
+            val_loader, 
+            device_id, 
+            is_ddp=is_ddp, 
+            use_fp8=use_fp8_flag
+        )
+                
         if is_main_process:
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
             if val_acc > best_val_acc:
@@ -115,28 +121,61 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
 
-def evaluate_baseline_model(model, val_loader, device_id, is_ddp=False):
-    """评估函数也使用autocast"""
+# 确保导入了 transformer_engine
+try:
+    import transformer_engine.pytorch as te
+    TRANSFORMER_ENGINE_AVAILABLE = True
+except ImportError:
+    TRANSFORMER_ENGINE_AVAILABLE = False
+
+def evaluate_model_compatible(model, val_loader, device_id, is_ddp=False, use_fp8=False):
+    """
+    一个兼容标准、混合精度和FP8模型的评估函数。
+    """
     model.eval()
-    correct, total = 0, 0
+    correct = 0
+    total = 0
+    
+    # 在评估时禁用梯度计算，以节省显存和计算
     with torch.no_grad():
+        # 根据是否使用FP8，选择不同的autocast上下文
+        autocast_context = None
+        if use_fp8:
+            if not TRANSFORMER_ENGINE_AVAILABLE:
+                raise ImportError("请求使用FP8进行评估，但Transformer Engine未安装。")
+            # 使用Transformer Engine的FP8上下文
+            autocast_context = te.fp8_autocast(enabled=True)
+        else:
+            # 对于标准或BF16/FP16模型，使用PyTorch原生的autocast
+            # 注意: 这里的dtype应该与训练时匹配，例如 torch.bfloat16
+            autocast_context = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=True)
+
         for images, labels in val_loader:
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
 
-            # 在评估和推理时，也使用autocast来匹配训练时的数据类型并加速
-            with autocast(dtype=torch.bfloat16, enabled=True):
+            with autocast_context:
                 outputs = model(images)
             
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    # ... 之后的分布式结果同步逻辑保持不变 ...
+    # 在DDP模式下，聚合所有进程的结果
     if is_ddp:
-        # ...
-        pass
+        # 将Python标量转换为PyTorch张量，并放到当前GPU上
+        total_tensor = torch.tensor(total, device=device_id)
+        correct_tensor = torch.tensor(correct, device=device_id)
+        
+        # 使用 all_reduce 操作对所有GPU上的张量求和
+        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+        
+        # 将聚合后的结果从张量转回Python标量
+        total = total_tensor.item()
+        correct = correct_tensor.item()
     
+    # 计算最终精度，只有主进程需要这个结果，但这里为简单起见所有进程都计算
     accuracy = 100 * correct / total if total > 0 else 0
     return accuracy
 
@@ -268,6 +307,91 @@ def train_on_single(args, config):
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
 
     dist.destroy_process_group()
+
+import transformer_engine.pytorch as te
+from transformer_engine.common import recipe
+def train_vit_model_fp8(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
+    """
+    为FP8优化的ViT模型设计的主训练循环。
+    """
+    # 1. 不再需要 GradScaler
+    # scaler = GradScaler(...)
+
+    best_val_acc = 0.0
+    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
+
+    if is_main_process:
+        logging.info("开始ViT训练，共 %d 个epoch (使用FP8优化)...", num_epochs)
+
+    # 2. 定义FP8训练的"配方"
+    #    E4M3是前向传播的格式, HYBRID是反向传播的格式, 这是H100的推荐默认值。
+    fp8_recipe = recipe.DelayedScaling(
+        margin=0, interval=1, fp8_format=recipe.Format.HYBRID
+    )
+
+    for epoch in range(num_epochs):
+        if is_ddp:
+            train_loader.sampler.set_epoch(epoch)
+        
+        model.train()
+        running_loss, running_corrects, running_total = 0.0, 0, 0
+        
+        for i, (images, labels) in enumerate(train_loader):
+            images = images.to(device_id, non_blocking=True)
+            labels = labels.to(device_id, non_blocking=True)
+            
+            # 恢复标准的梯度清零
+            optimizer.zero_grad()
+            
+            # 3. 使用 Transformer Engine 的 fp8_autocast 上下文管理器
+            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+            # 4. 恢复标准的后向传播和优化器更新
+            loss.backward()
+            optimizer.step()
+
+            # --- 之后的评估逻辑保持不变 ---
+            _, predicted = torch.max(outputs.data, 1)
+            running_total += labels.size(0)
+            running_corrects += (predicted == labels).sum().item()
+            running_loss += loss.item()
+
+            if (i + 1) % 10 == 0 and is_main_process:
+                train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
+                avg_loss = running_loss / 10
+                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}]  Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
+                running_loss, running_corrects, running_total = 0.0, 0, 0
+                
+        scheduler.step()
+        
+        # 注意：您的评估函数(evaluate_baseline_model)内部也应该使用 fp8_autocast
+        # 以确保数据类型一致并获得加速，但评估时不需要梯度计算。
+                # 从您的模型配置中获取use_fp8标志
+        model_config = config.get('model', {})
+        use_fp8_flag = model_config.get('use_fp8', False)
+
+        # 调用兼容性更强的评估函数
+        val_acc = evaluate_model_compatible(
+            model, 
+            val_loader, 
+            device_id, 
+            is_ddp=is_ddp, 
+            use_fp8=use_fp8_flag
+        )
+        
+        if is_main_process:
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                logging.info(f"新的最佳验证精度: {best_val_acc:.4f}. 保存模型至 {checkpoint_path}")
+                model_to_save = model.module if is_ddp else model
+                torch.save(model_to_save.state_dict(), checkpoint_path)
+
+    if is_main_process:
+        logging.info(f'训练完成。最佳验证精度: {best_val_acc:.4f}')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT Training Script")
