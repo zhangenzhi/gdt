@@ -3,6 +3,7 @@ import sys
 import yaml
 import logging
 import argparse
+import contextlib
 
 import torch
 from torch import nn
@@ -41,8 +42,11 @@ def setup_logging(args):
 
 def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
     # 1. 初始化 GradScaler
-    # enabled=True 表示启用混合精度。可以将其设为命令行参数来控制是否开启。
     scaler = GradScaler(enabled=True)
+    num_epochs = config['training']['num_epochs']
+    accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
+    is_main_process = not is_ddp or (dist.get_rank() == 0)
+    best_val_acc = 0.0
 
     best_val_acc = 0.0
     checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
@@ -50,36 +54,34 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
 
     if is_main_process:
         # 在日志中注明正在使用混合精度
-        logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)
+        logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)   
+        logging.info("开始BF16优化训练...")
+        logging.info(f"torch.compile: {config['training'].get('use_compile', False)}, Fused Optimizer: {config['training'].get('use_fused_optimizer', False)}, Activation Checkpointing: {config['training'].get('use_checkpointing', False)}")
 
     for epoch in range(num_epochs):
-        if is_ddp:
-            train_loader.sampler.set_epoch(epoch)
-        
+        if is_ddp: train_loader.sampler.set_epoch(epoch)
         model.train()
+        
         running_loss, running_corrects, running_total = 0.0, 0, 0
         
         for i, (images, labels) in enumerate(train_loader):
+            is_accumulation_step = (i + 1) % accumulation_steps != 0
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
+            sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
             
-            optimizer.zero_grad()
-            
-            # 2. 使用 autocast 上下文管理器包裹前向传播和损失计算
-            # dtype=torch.bfloat16 是H100的最佳选择。也可以使用 torch.float16
-            with autocast(device_type='cuda', dtype=torch.bfloat16):
-                outputs = model(images)
-                loss = criterion(outputs, labels)
+            with sync_context:
+                with autocast(device_type='cuda', dtype=torch.bfloat16):
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+                    loss = loss / accumulation_steps
+                
+                scaler.scale(loss).backward()
 
-            # 3. 使用 GradScaler 缩放损失并执行反向传播
-            # scaler.scale(loss) 会将损失乘以一个缩放因子
-            scaler.scale(loss).backward()
-
-            # 4. scaler.step() 会先将梯度反缩放，然后调用优化器执行更新
-            scaler.step(optimizer)
-
-            # 5. 更新 GradScaler 的缩放因子
-            scaler.update()
+            if not is_accumulation_step:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
 
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
@@ -95,10 +97,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 running_loss, running_corrects, running_total = 0.0, 0, 0
                 
         scheduler.step()
-
-        # 从您的模型配置中获取use_fp8标志
-        model_config = config.get('model', {})
-        use_fp8_flag = model_config.get('use_fp8', False)
 
         # 调用兼容性更强的评估函数
         val_acc = evaluate_model_compatible(
@@ -120,47 +118,27 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
 
-def evaluate_model_compatible(model, val_loader, device_id, is_ddp=False):
-    """
-    一个兼容标准、混合精度和FP8模型的评估函数。
-    """
+def evaluate_model_compatible(model, val_loader, device, is_ddp=False):
+    """评估函数。"""
     model.eval()
-    correct = 0
-    total = 0
-    
-    # 在评估时禁用梯度计算，以节省显存和计算
+    correct, total = 0, 0
     with torch.no_grad():
-        # 根据是否使用FP8，选择不同的autocast上下文
-        autocast_context = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=True)
-
-        for images, labels in val_loader:
-            images = images.to(device_id, non_blocking=True)
-            labels = labels.to(device_id, non_blocking=True)
-
-            with autocast_context:
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
+            for images, labels in val_loader:
+                images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
                 outputs = model(images)
-            
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
 
-    # 在DDP模式下，聚合所有进程的结果
     if is_ddp:
-        # 将Python标量转换为PyTorch张量，并放到当前GPU上
-        total_tensor = torch.tensor(total, device=device_id)
-        correct_tensor = torch.tensor(correct, device=device_id)
+        total_tensor = torch.tensor(total, device=device)
+        correct_tensor = torch.tensor(correct, device=device)
+        dist.all_reduce(total_tensor)
+        dist.all_reduce(correct_tensor)
+        total, correct = total_tensor.item(), correct_tensor.item()
         
-        # 使用 all_reduce 操作对所有GPU上的张量求和
-        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
-        
-        # 将聚合后的结果从张量转回Python标量
-        total = total_tensor.item()
-        correct = correct_tensor.item()
-    
-    # 计算最终精度，只有主进程需要这个结果，但这里为简单起见所有进程都计算
-    accuracy = 100 * correct / total if total > 0 else 0
-    return accuracy
+    return 100 * correct / total if total > 0 else 0
 
 def setup_ddp(rank, world_size):
     os.environ['MASTER_ADDR'] = os.environ.get('HOSTNAME', 'localhost')
