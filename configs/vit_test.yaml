@@ -17,10 +17,10 @@ model:
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.0001
+  learning_rate: 0.001
   weight_decay: 0.05
-  scheduler: "CosineAnnealingLR"
-  min_lr: 1.0e-6
+  warmup_epochs: 10  # 设置10个周期的预热期
+
   num_epochs: 200
   batch_size: 1024 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
 

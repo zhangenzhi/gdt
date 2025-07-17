@@ -11,6 +11,7 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 
 import torch.distributed as dist
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.amp import GradScaler, autocast 
@@ -267,7 +268,7 @@ def train_on_single(args, config):
 
     # ... 之后的代码（优化器、训练循环等）完全相同 ...
     criterion = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+
     # *** 加速优化 2: Fused Optimizer ***
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
@@ -276,8 +277,28 @@ def train_on_single(args, config):
         weight_decay=config['training']['weight_decay'],
         fused=use_fused # 在CUDA上可用时自动启用融合内核
     )
-    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
     
+     # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
+    training_config = config['training']
+    num_epochs = training_config['num_epochs']
+    warmup_epochs = training_config.get('warmup_epochs', 0)
+    
+    # 计算总的训练步数和预热步数
+    steps_per_epoch = len(dataloaders['train'])
+    num_training_steps = num_epochs * steps_per_epoch
+    num_warmup_steps = warmup_epochs * steps_per_epoch
+    
+    if num_warmup_steps > 0:
+        # 预热调度器：从一个很小的值线性增长到1
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        # 主调度器：在预热结束后，进行余弦退火
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=0)
+        # 使用SequentialLR将两者串联起来
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
+    else:
+        # 如果不使用预热，则只使用余弦退火
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+        
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
@@ -292,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument('--savefile', type=str, default='vit-b-16-opt', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=24, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     parser.add_argument('--local', action='store_true', help='Run training locally without DDP')
