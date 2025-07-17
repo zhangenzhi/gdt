@@ -83,7 +83,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
-
+                if scheduler: scheduler.step()
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
             running_total += labels.size(0)
@@ -97,7 +97,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
                 
-        scheduler.step()
+        # scheduler.step()
 
         # 调用兼容性更强的评估函数
         val_acc = evaluate_model_compatible(
@@ -294,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument('--savefile', type=str, default='vit-b-16-opt', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=24, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     parser.add_argument('--local', action='store_true', help='Run training locally without DDP')
