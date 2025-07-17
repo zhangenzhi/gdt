@@ -215,35 +215,22 @@ def vit_imagenet_train_local(args, config):
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
 
 def train_on_single(args, config):
-    """
-    一个更健壮的主函数，能自动适应多卡GPU、单卡GPU和纯CPU环境。
-    """
     # torchrun 会自动设置 'LOCAL_RANK' 等环境变量
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
-
-    # --- 关键修改：根据环境选择后端和设备 ---
-    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-        backend = 'nccl'  # 使用GPU
-        device = torch.device("cuda", local_rank)
-        torch.cuda.set_device(device)
-    else:
-        backend = 'gloo'  # 使用CPU
-        device = torch.device("cpu")
+    backend = 'nccl'  # 使用GPU
+    device = torch.device("cuda", local_rank)
+    torch.cuda.set_device(device)
     
     dist.init_process_group(backend=backend, rank=local_rank, world_size=world_size)
-    # --- 修改结束 ---
 
-    # 只有主进程 (rank 0) 才执行日志设置和打印
     if local_rank == 0:
         setup_logging(args)
         logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}")
 
-    # ... 之后的代码（数据加载、模型创建等）与之前基本相同 ...
     args.img_size = config['model']['img_size']
     args.batch_size = config['training']['batch_size']
     
-    # 注意：imagenet_distribute 内部也需要能处理 device='cpu' 的情况
     dataloaders = imagenet_distribute(
     img_size=args.img_size,
     data_dir=args.data_dir,
@@ -251,25 +238,19 @@ def train_on_single(args, config):
     num_workers=args.num_workers)
     
     model = create_vit_model(config).to(device)
-    # *** 加速优化 1: torch.compile ***
     if config['training'].get('use_compile', False):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
-        # 必须在DDP包装之前进行编译
         model = torch.compile(model)
         
-    # 只有在GPU上才需要用DDP包装。在CPU上，当world_size > 1时也需要
     if device.type == 'cuda' or world_size > 1:
-        # 对于CPU的多进程训练，也需要DDP
-        # 注意：在CPU模式下，DDP不需要 device_ids 参数
         if device.type == 'cuda':
             model = DDP(model, device_ids=[local_rank], output_device=local_rank)
         else:
             model = DDP(model)
 
-    # ... 之后的代码（优化器、训练循环等）完全相同 ...
+
     criterion = nn.CrossEntropyLoss()
 
-    # *** 加速优化 2: Fused Optimizer ***
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -313,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument('--savefile', type=str, default='vit-b-16-opt', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_workers', type=int, default=24, help='Number of workers for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     # Use action='store_true' for boolean flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     parser.add_argument('--local', action='store_true', help='Run training locally without DDP')
