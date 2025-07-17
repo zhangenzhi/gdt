@@ -19,7 +19,7 @@ training:
   optimizer: "AdamW"
   learning_rate: 0.01
   weight_decay: 0.05
-  warmup_epochs: 10  # 设置10个周期的预热期
+  warmup_epochs: 20  # 设置10个周期的预热期
 
   num_epochs: 200
   batch_size: 1024 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
