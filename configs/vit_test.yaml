@@ -17,7 +17,7 @@ model:
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.001
+  learning_rate: 0.0008
   weight_decay: 0.05
   warmup_epochs: 20 
 

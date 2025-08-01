@@ -45,3 +45,21 @@ The script automatically detects the environment and selects the appropriate mod
 
 All training artifacts, including logs and model checkpoints, are saved to the directory specified by the `--output` and `--savefile` arguments. The final output path will be `[output]/[task_name]/[savefile]`, where `task_name` is defined in the configuration file.
 
+## Referrence
+
+_A summary of relevant long sequence training methods that reduce the amount of work. *N* = sequence length._
+
+| **Approach** | **Method** | **Merits & Demerits** | **Complexity (Best)** | **Model** | **Implementation** |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Attention Approximation | Longformer [beltagy2020longformer] ETC [ainslie2020etc] | **(+)** Better time complexity vs Transformer. \ **(-)** Sparsity levels insufficient for gains to materialize. | O(N) \ O(N√N) | Some Models w/ Forked PyTorch | Custom Self-attention Implementation |
+| | BigBird [zaheer2020big] Reformer [kitaev2020reformer] | **(+)** Theoretically proven time complexity. \ **(-)** High-order derivatives | O(NlogN) | Some Models w/ Forked PyTorch | Custom Self-attention Implementation |
+| | Sparse Attention [child2019generating] | **(+)** Introduced sparse factorizations of the attention. \ **(-)** Higher time complexity. | O(N√N) | Some Models w/ Forked PyTorch | Custom Self-attention Implementation |
+| | Linformer [katharopoulos2020transformers] Performer [choromanski2020rethinking] | **(+)** Fast adaptation \ **(-)** Assumption that self-attention is low rank. | O(N) | Some Models w/ Forked PyTorch | Custom Self-attention Implementation |
+| | SPFormer [mei2024spformer] (Prediction) | **(+)** Irregular tokens. \ **(-)** No adaptation to high resolution. | O(P²) \ P:num of regions | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| Hierarchical | Hier. Transformer [si21] (Text Classification) | **(+)** Independent hyperpara. tuning of hierarc. models. \ **(-)** No support for ViT. | O(NlogN) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| | CrossViT [chen2021crossvit] (Classification) | **(+)** Better time complexity vs standard ViT.  \ **(-)** Complex token fusion scheme in dual-branch ViTs. | O(N) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| | HIPT [Chen22] (Classification) | **(+)** Model inductive biases of features in the hierarchy.  \ **(-)** High cost for training multiple models. | O(NlogN) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| | MEGABYTE [yu2023megabyte] (Prediction) | **(+)** Support of multi-modality. \ **(-)** High cost for training multiple models. | O(N<sup>4/3</sup>) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| High-resolution | xT [gupta2024xt] (Prediction) | **(+)** Support of 8K resolution . \ **(-)** Lack of adaptivation. | O(NlogN) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| | HiFormer [heidari2023hiformer] (Prediction) | **(+)** Support of multi-modality. \ **(-)** High cost for ultra-resolution. | O(NlogN) | Custom Model w/ Plain PyTorch | Custom Model Implementation |
+| **Ours** | **Gumble Differentialbe Tree** (Segmentation & Class.) | **(+)** Attention mechanism intact.  \ **(+)** Largely reduces computation cost; maintains quality.  \ **(+)** Efficiency depends on level of details in an image. \ **(-)** task semantics are independent of edge information. | O(log²N) | Any Model w/ Plain PyTorch | Image Pre-processing |
