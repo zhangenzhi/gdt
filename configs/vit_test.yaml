@@ -17,9 +17,9 @@ model:
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.0008
+  learning_rate: 0.001
   weight_decay: 0.05
-  warmup_epochs: 40 
+  warmup_epochs: 10 
 
   num_epochs: 200
   batch_size: 1280 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
