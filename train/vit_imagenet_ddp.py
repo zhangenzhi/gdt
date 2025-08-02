@@ -46,11 +46,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
-    is_main_process = not is_ddp or (dist.get_rank() == 0)
-    best_val_acc = 0.0
 
-    best_val_acc = 0.0
-    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
     if is_main_process:
@@ -112,7 +109,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | 验证精度: {val_acc:.4f} | 当前学习率: {current_lr:.6f}")
             
             # *** 修改: 完整的检查点保存逻辑 ***
-            checkpoint_dir = os.path.join(args.output, config['model'].get('savefile', 'vit_run'))
+            checkpoint_dir = os.path.join(args.output, args.savefile)
+            # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
             
             # 总是保存最新的检查点
             latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
