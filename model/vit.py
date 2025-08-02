@@ -213,6 +213,6 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes'],        
-        layer_scale_init_value=model_config['layer_scale_init_value']
+        layer_scale_init_value=float(model_config['layer_scale_init_value'])
     )
     return model
