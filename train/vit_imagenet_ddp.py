@@ -238,6 +238,11 @@ def train_on_single(args, config):
     num_workers=args.num_workers)
     
     model = create_vit_model(config).to(device)
+    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
+    if args.reload and os.path.exists(checkpoint_path):
+        logging.info(f"Reloading model from {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device(device)))
+        
     if config['training'].get('use_compile', False):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
         model = torch.compile(model)
