@@ -41,7 +41,7 @@ def setup_logging(args):
         ]
     )
 
-def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, is_ddp=False):
+def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, best_val_acc=0.0, is_ddp=False):
     # 1. 初始化 GradScaler
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
@@ -108,12 +108,34 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         )
                 
         if is_main_process:
-            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | 验证精度: {val_acc:.4f} | 当前学习率: {current_lr:.6f}")
+            
+            # *** 修改: 完整的检查点保存逻辑 ***
+            checkpoint_dir = os.path.join(args.output, config['model'].get('savefile', 'vit_run'))
+            
+            # 总是保存最新的检查点
+            latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.module.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_acc': best_val_acc,
+            }, latest_checkpoint_path)
+
+            # 如果是最佳模型，则另外保存一份
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                logging.info(f"New best validation accuracy: {best_val_acc:.4f}. Saving model to {checkpoint_path}")
-                model_to_save = model.module if is_ddp else model
-                torch.save(model_to_save.state_dict(), checkpoint_path)
+                logging.info(f"新的最佳验证精度: {best_val_acc:.4f}. 保存最佳模型...")
+                best_checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.module.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'best_val_acc': best_val_acc,
+                }, best_checkpoint_path)
 
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
@@ -214,7 +236,7 @@ def vit_imagenet_train_local(args, config):
 
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
 
-def train_on_single(args, config):
+def vit_imagenet_train_single(args, config):
     # torchrun 会自动设置 'LOCAL_RANK' 等环境变量
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -238,10 +260,6 @@ def train_on_single(args, config):
     num_workers=args.num_workers)
     
     model = create_vit_model(config).to(device)
-    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
-    if args.reload and os.path.exists(checkpoint_path):
-        logging.info(f"Reloading model from {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device(device)))
         
     if config['training'].get('use_compile', False):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
@@ -252,7 +270,6 @@ def train_on_single(args, config):
             model = DDP(model, device_ids=[local_rank], output_device=local_rank)
         else:
             model = DDP(model)
-
 
     criterion = nn.CrossEntropyLoss()
 
@@ -284,8 +301,31 @@ def train_on_single(args, config):
     else:
         # 如果不使用预热，则只使用余弦退火
         scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+    
+    # *** 新增: 完整的检查点加载逻辑 ***
+    start_epoch = 0
+    best_val_acc = 0.0
+    checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
+
+    if args.reload and os.path.exists(checkpoint_path):
+        if dist.get_rank() == 0:
+            logging.info(f"从检查点恢复训练: {checkpoint_path}")
         
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, is_ddp=(world_size > 1))
+        # 加载到CPU以避免GPU内存冲突，并确保所有进程加载相同的权重
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        
+        # 加载模型权重 (注意要加载到 model.module)
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_acc = checkpoint['best_val_acc']
+        
+        if dist.get_rank() == 0:
+            logging.info(f"成功恢复，将从 Epoch {start_epoch + 1} 开始。")
+            
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
 
@@ -318,4 +358,4 @@ if __name__ == "__main__":
     args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
-    train_on_single(args, config)
+    vit_imagenet_train_single(args, config)
