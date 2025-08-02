@@ -303,7 +303,9 @@ def vit_imagenet_train_single(args, config):
     # *** 新增: 完整的检查点加载逻辑 ***
     start_epoch = 0
     best_val_acc = 0.0
-    checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
+    checkpoint_dir = os.path.join(args.output, args.savefile)
+    checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
+    # checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
 
     if args.reload and os.path.exists(checkpoint_path):
         if dist.get_rank() == 0:
