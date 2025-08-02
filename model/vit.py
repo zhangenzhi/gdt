@@ -213,7 +213,6 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes'],        
-        use_checkpointing=model_config.get('use_checkpointing', False),
-        layer_scale_init_value=model_config.get('layer_scale_init_value', 0)
+        layer_scale_init_value=model_config.get('layer_scale_init_value', 0.0)
     )
     return model
