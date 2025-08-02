@@ -24,52 +24,6 @@ class PatchEmbedding(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
-class Block(nn.Module):
-    """
-    带有LayerScale的Transformer块 (Pre-Norm结构)。
-    """
-    def __init__(self, dim, num_heads, mlp_ratio=4., dropout=0., layer_scale_init_value=1e-6):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        # 注意: PyTorch的MultiheadAttention默认dropout在softmax之后，这里我们保持一致
-        self.attn = nn.MultiheadAttention(dim, num_heads, dropout=dropout, batch_first=True)
-        self.norm2 = nn.LayerNorm(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, mlp_hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(mlp_hidden_dim, dim),
-            nn.Dropout(dropout)
-        )
-
-        # LayerScale参数
-        self.gamma_1 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
-        self.gamma_2 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
-
-    def forward(self, x):
-        # 注意力块 (Pre-Norm)
-        normed_x = self.norm1(x)
-        attn_output, _ = self.attn(normed_x, normed_x, normed_x)
-        
-        # 应用LayerScale并添加残差连接
-        if self.gamma_1 is not None:
-            x = x + self.gamma_1 * attn_output
-        else:
-            x = x + attn_output
-
-        # MLP块 (Pre-Norm)
-        normed_x = self.norm2(x)
-        mlp_output = self.mlp(normed_x)
-
-        # 应用LayerScale并添加残差连接
-        if self.gamma_2 is not None:
-            x = x + self.gamma_2 * mlp_output
-        else:
-            x = x + mlp_output
-            
-        return x
-
 class VisionTransformer(nn.Module):
     """Standard Vision Transformer with a Transformer Encoder."""
     def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
@@ -125,7 +79,53 @@ class VisionTransformer(nn.Module):
         
         # Return only logits to match standard classifier output
         return logits
-    
+
+# class Block(nn.Module):
+#     """
+#     带有LayerScale的Transformer块 (Pre-Norm结构)。
+#     """
+#     def __init__(self, dim, num_heads, mlp_ratio=4., dropout=0., layer_scale_init_value=1e-6):
+#         super().__init__()
+#         self.norm1 = nn.LayerNorm(dim)
+#         # 注意: PyTorch的MultiheadAttention默认dropout在softmax之后，这里我们保持一致
+#         self.attn = nn.MultiheadAttention(dim, num_heads, dropout=dropout, batch_first=True)
+#         self.norm2 = nn.LayerNorm(dim)
+#         mlp_hidden_dim = int(dim * mlp_ratio)
+#         self.mlp = nn.Sequential(
+#             nn.Linear(dim, mlp_hidden_dim),
+#             nn.GELU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(mlp_hidden_dim, dim),
+#             nn.Dropout(dropout)
+#         )
+
+#         # LayerScale参数
+#         self.gamma_1 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
+#         self.gamma_2 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
+
+#     def forward(self, x):
+#         # 注意力块 (Pre-Norm)
+#         normed_x = self.norm1(x)
+#         attn_output, _ = self.attn(normed_x, normed_x, normed_x)
+        
+#         # 应用LayerScale并添加残差连接
+#         if self.gamma_1 is not None:
+#             x = x + self.gamma_1 * attn_output
+#         else:
+#             x = x + attn_output
+
+#         # MLP块 (Pre-Norm)
+#         normed_x = self.norm2(x)
+#         mlp_output = self.mlp(normed_x)
+
+#         # 应用LayerScale并添加残差连接
+#         if self.gamma_2 is not None:
+#             x = x + self.gamma_2 * mlp_output
+#         else:
+#             x = x + mlp_output
+            
+#         return x
+
 # class VisionTransformer(nn.Module):
 #     """
 #     标准的视觉Transformer。
@@ -269,6 +269,6 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes'],        
-        layer_scale_init_value=float(model_config['layer_scale_init_value'])
+        # layer_scale_init_value=float(model_config['layer_scale_init_value'])
     )
     return model
