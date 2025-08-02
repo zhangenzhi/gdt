@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from typing import List, Dict
+from torch.utils.checkpoint import checkpoint
 
 class PatchEmbedding(nn.Module):
     """
@@ -23,61 +24,116 @@ class PatchEmbedding(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
-class VisionTransformer(nn.Module):
-    """Standard Vision Transformer with a Transformer Encoder."""
-    def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
+class Block(nn.Module):
+    """
+    带有LayerScale的Transformer块 (Pre-Norm结构)。
+    """
+    def __init__(self, dim, num_heads, mlp_ratio=4., dropout=0., layer_scale_init_value=1e-6):
         super().__init__()
-        self.embed_dim = embed_dim
-        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
-        num_patches = self.patch_embed.num_patches
+        self.norm1 = nn.LayerNorm(dim)
+        # 注意: PyTorch的MultiheadAttention默认dropout在softmax之后，这里我们保持一致
+        self.attn = nn.MultiheadAttention(dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm2 = nn.LayerNorm(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(mlp_hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
 
-        # Special tokens
+        # LayerScale参数
+        self.gamma_1 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
+        self.gamma_2 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
+
+    def forward(self, x):
+        # 注意力块 (Pre-Norm)
+        normed_x = self.norm1(x)
+        attn_output, _ = self.attn(normed_x, normed_x, normed_x)
+        
+        # 应用LayerScale并添加残差连接
+        if self.gamma_1 is not None:
+            x = x + self.gamma_1 * attn_output
+        else:
+            x = x + attn_output
+
+        # MLP块 (Pre-Norm)
+        normed_x = self.norm2(x)
+        mlp_output = self.mlp(normed_x)
+
+        # 应用LayerScale并添加残差连接
+        if self.gamma_2 is not None:
+            x = x + self.gamma_2 * mlp_output
+        else:
+            x = x + mlp_output
+            
+        return x
+
+class VisionTransformer(nn.Module):
+    """
+    标准的视觉Transformer。
+    新增了 'use_checkpointing' 和 'layer_scale_init_value' 参数。
+    """
+    def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, 
+                 num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1, 
+                 use_checkpointing=False, layer_scale_init_value=1e-6):
+        super().__init__()
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
+        num_patches = (img_size // patch_size) ** 2
+
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.pos_drop = nn.Dropout(p=dropout)
 
-        # Transformer Encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim, 
-            nhead=num_heads, 
-            dim_feedforward=int(embed_dim * mlp_ratio), 
-            dropout=dropout, 
-            batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+        # *** 修改: 使用自定义的Block模块列表替换nn.TransformerEncoder ***
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                dropout=dropout,
+                layer_scale_init_value=layer_scale_init_value
+            )
+            for _ in range(depth)])
+        # 为了与激活检查点兼容，我们将ModuleList包装在nn.Sequential中
+        self.transformer_encoder = nn.Sequential(*self.blocks)
 
-        # Classifier Head
         self.norm = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, num_classes)
-
+        
+        self.use_checkpointing = use_checkpointing
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+            if m.bias is not None: nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x):
+    def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
-
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed
         x = self.pos_drop(x)
-
-        x = self.transformer_encoder(x)
         
-        # Get the CLS token for classification
+        if self.use_checkpointing and self.training:
+            x = checkpoint(self.transformer_encoder, x, use_reentrant=False)
+        else:
+            x = self.transformer_encoder(x)
+            
+        return x
+
+    def forward(self, x):
+        x = self.forward_features(x)
         cls_output = self.norm(x[:, 0])
         logits = self.head(cls_output)
-        
-        # Return only logits to match standard classifier output
         return logits
+
 
 class RelativeAttention(nn.Module):
     def __init__(self, dim, num_heads, max_rel_distance=128):
@@ -156,6 +212,8 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        num_classes=model_config['num_classes']
+        num_classes=model_config['num_classes'],        
+        use_checkpointing=model_config.get('use_checkpointing', False),
+        layer_scale_init_value=model_config.get('layer_scale_init_value', 0)
     )
     return model

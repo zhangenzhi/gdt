@@ -13,6 +13,7 @@ model:
   num_heads: 12
   mlp_ratio: 4.0
   num_classes: 1000
+  layer_scale_init_value: 1e-6
 
 # 2. Training Hyperparameters
 training:
@@ -20,7 +21,6 @@ training:
   learning_rate: 0.0008
   weight_decay: 0.05
   warmup_epochs: 10 
-  layer_scale_init_value: 1e-6
 
   num_epochs: 300
   batch_size: 1280 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
