@@ -9,7 +9,7 @@ model:
   patch_size: 16
   in_channels: 3
   embed_dim: 768
-  depth: 6
+  depth: 12
   num_heads: 12
   mlp_ratio: 4.0
   num_classes: 1000
@@ -20,7 +20,7 @@ training:
   optimizer: "AdamW"
   learning_rate: 0.0008
   weight_decay: 0.05
-  warmup_epochs: 10 
+  warmup_epochs: 5 
 
   num_epochs: 300
   batch_size: 1280 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)

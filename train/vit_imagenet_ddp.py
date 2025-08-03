@@ -11,9 +11,8 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 
 import torch.distributed as dist
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.amp import GradScaler, autocast 
 
 
@@ -281,26 +280,63 @@ def vit_imagenet_train_single(args, config):
         fused=use_fused # 在CUDA上可用时自动启用融合内核
     )
     
-     # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
+    #  # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
+    # training_config = config['training']
+    # num_epochs = training_config['num_epochs']
+    # warmup_epochs = training_config.get('warmup_epochs', 0)
+    
+    # # 计算总的训练步数和预热步数
+    # steps_per_epoch = len(dataloaders['train'])
+    # num_training_steps = num_epochs * steps_per_epoch
+    # num_warmup_steps = warmup_epochs * steps_per_epoch
+    
+    # if num_warmup_steps > 0:
+    #     # 预热调度器：从一个很小的值线性增长到1
+    #     warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
+    #     # 主调度器：在预热结束后，进行余弦退火
+    #     main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
+    #     # 使用SequentialLR将两者串联起来
+    #     scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
+    # else:
+    #     # 如果不使用预热，则只使用余弦退火
+    #     scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+    
+    #     # *** 修改: 创建包含线性预热和多步衰减的组合调度器 ***
+    
     training_config = config['training']
     num_epochs = training_config['num_epochs']
     warmup_epochs = training_config.get('warmup_epochs', 0)
     
-    # 计算总的训练步数和预热步数
     steps_per_epoch = len(dataloaders['train'])
     num_training_steps = num_epochs * steps_per_epoch
     num_warmup_steps = warmup_epochs * steps_per_epoch
-    
+
     if num_warmup_steps > 0:
-        # 预热调度器：从一个很小的值线性增长到1
+        # 1. 预热调度器
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
-        # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
-        # 使用SequentialLR将两者串联起来
+        
+        # 2. 主调度器: MultiStepLR
+        # 计算衰减点对应的训练步数
+        milestone1_step = int(num_epochs * 0.5 * steps_per_epoch)
+        milestone2_step = int(num_epochs * 0.75 * steps_per_epoch)
+        
+        # MultiStepLR的里程碑需要相对于其自身的起点（即预热结束后）
+        main_scheduler_milestones = [
+            milestone1_step - num_warmup_steps,
+            milestone2_step - num_warmup_steps,
+        ]
+        # 过滤掉因预热期过长而可能产生的无效（负数）里程碑
+        main_scheduler_milestones = [m for m in main_scheduler_milestones if m > 0]
+
+        main_scheduler = MultiStepLR(optimizer, milestones=main_scheduler_milestones, gamma=0.1)
+        
+        # 3. 使用SequentialLR将两者串联
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
-        # 如果不使用预热，则只使用余弦退火
-        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+        # 如果不使用预热，则只使用MultiStepLR
+        milestone1_step = int(num_epochs * 0.5 * steps_per_epoch)
+        milestone2_step = int(num_epochs * 0.75 * steps_per_epoch)
+        scheduler = MultiStepLR(optimizer, milestones=[milestone1_step, milestone2_step], gamma=0.1)
     
     # *** 新增: 完整的检查点加载逻辑 ***
     start_epoch = 0
