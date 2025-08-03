@@ -9,7 +9,7 @@ model:
   patch_size: 16
   in_channels: 3
   embed_dim: 768
-  depth: 12
+  depth: 6
   num_heads: 12
   mlp_ratio: 4.0
   num_classes: 1000
