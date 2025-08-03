@@ -92,7 +92,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             if (i + 1) % 10 == 0 and is_main_process:
                 train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
                 avg_loss = running_loss / 10
-                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
+                current_lr = optimizer.param_groups[0]['lr']
+                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%, current_lr: {current_lr:.6f}')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
                 
         # scheduler.step()
@@ -107,7 +108,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 
         if is_main_process:
             current_lr = optimizer.param_groups[0]['lr']
-            logging.info(f"Epoch {epoch + 1}/{num_epochs} | 验证精度: {val_acc:.4f} | 当前学习率: {current_lr:.6f}")
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | VAL ACC: {val_acc:.4f} | current_lr: {current_lr:.6f}")
             
             # *** 修改: 完整的检查点保存逻辑 ***
             checkpoint_dir = os.path.join(args.output, args.savefile)
@@ -305,7 +306,7 @@ def vit_imagenet_train_single(args, config):
     start_epoch = 0
     best_val_acc = 0.0
     checkpoint_dir = os.path.join(args.output, args.savefile)
-    checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
+    checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
     # checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
 
     if args.reload and os.path.exists(checkpoint_path):
