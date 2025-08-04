@@ -277,7 +277,7 @@ def vit_imagenet_train_single(args, config):
         model.parameters(), 
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
-        betas=tuple(training_config.get('betas', (0.9, 0.999))),
+        betas=tuple(config['training'].get('betas', (0.9, 0.999))),
         fused=use_fused # 在CUDA上可用时自动启用融合内核
     )
     
