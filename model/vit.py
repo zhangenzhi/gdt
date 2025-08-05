@@ -416,7 +416,7 @@ if __name__ == '__main__':
     # Ensure CUDA is available
     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
         device = torch.device("cuda")
-        batch_size = 8 # Example batch size
+        batch_size = 16 # Example batch size
         num_classes = 1000
         
         # Define a model configuration
