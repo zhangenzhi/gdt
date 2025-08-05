@@ -86,7 +86,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             running_total += labels.size(0)
             running_corrects += (predicted == labels).sum().item()
             # 注意：loss.item() 会自动返回未缩放的、float32类型的损失值
-            running_loss += loss.item()
+            running_loss += loss.item() * accumulation_steps
 
             if (i + 1) % 10 == 0 and is_main_process:
                 train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
