@@ -410,7 +410,7 @@ if __name__ == '__main__':
     # Ensure CUDA is available
     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
         device = torch.device("cuda")
-        batch_size = 2 # Example batch size
+        batch_size = 8 # Example batch size
         num_classes = 1000
         
         # Define a model configuration
@@ -432,7 +432,6 @@ if __name__ == '__main__':
         # and torch.compile, e.g.:
         # model = torch.nn.parallel.DistributedDataParallel(model)
         # model = torch.compile(model)
-
 
         print("Model Instantiated on CUDA with Transformer Engine layers via factory.")
 
