@@ -80,6 +80,122 @@ class VisionTransformer(nn.Module):
         # Return only logits to match standard classifier output
         return logits
 
+class PatchEmbedding(nn.Module):
+    """
+    Image to Patch Embedding.
+    Converts a 2D image into a 1D sequence of patch embeddings.
+    (This module remains unchanged as Conv2d is not the primary target for TE FP8 acceleration)
+    """
+    def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768):
+        super().__init__()
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = (img_size // patch_size) ** 2
+        
+        # Use a single Conv2d layer for efficient patch embedding
+        self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        # x shape: [B, C, H, W] -> After proj: [B, D, H/P, W/P]
+        # After flatten and transpose: [B, N, D] where N = (H*W)/P^2
+        x = self.proj(x).flatten(2).transpose(1, 2)
+        return x
+
+import transformer_engine.pytorch as te
+from transformer_engine.common import recipe
+
+class VisionTransformerTE(nn.Module):
+    """
+    Vision Transformer optimized with NVIDIA Transformer Engine for FP8 training.
+    """
+    def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
+        super().__init__()
+        self.embed_dim = embed_dim
+        
+        # 1. Patch Embedding (unchanged)
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
+        num_patches = self.patch_embed.num_patches
+
+        # 2. Special tokens and positional embeddings (unchanged)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_drop = nn.Dropout(p=dropout)
+
+        # 3. Transformer Encoder replaced with Transformer Engine's TransformerLayer
+        # We create a ModuleList of TE layers.
+        self.transformer_layers = nn.ModuleList([
+            te.TransformerLayer(
+                hidden_size=embed_dim,
+                ffn_hidden_size=int(embed_dim * mlp_ratio),
+                num_attention_heads=num_heads,
+                hidden_dropout=dropout,
+                attention_dropout=dropout,
+                # 'no_mask' is suitable for ViT encoder self-attention
+                self_attn_mask_type="no_mask", 
+                # Use GELU activation in the MLP as is common in ViT
+                hidden_act="gelu",
+                # LayerNorm is applied before sub-modules (Attention, MLP)
+                layer_norm_positioning='pre'
+            ) for _ in range(depth)
+        ])
+
+        # 4. Classifier Head replaced with TE's LayerNorm and Linear
+        self.norm = te.LayerNorm(embed_dim)
+        self.head = te.Linear(embed_dim, num_classes, bias=True)
+
+        # Initialize weights (can use a similar scheme)
+        self.apply(self._init_weights)
+        
+        # Define the FP8 recipe for the autocast context
+        # E4M3 is generally recommended for forward pass, HYBRID for backward
+        self.fp8_recipe = recipe.DelayedScaling(
+            margin=0, 
+            interval=1, 
+            fp8_format=recipe.Format.E4M3, 
+            amax_history_len=16, 
+            amax_compute_algo="max"
+        )
+
+
+    def _init_weights(self, m):
+        # TE modules have their own optimized initializations, 
+        # but we can still initialize standard modules if needed.
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, x):
+        # 5. The forward pass is wrapped in the fp8_autocast context manager
+        # This enables FP8 execution for all TE modules within this block.
+        with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
+            B = x.shape[0]
+            x = self.patch_embed(x)
+
+            # Prepend CLS token and add positional embedding
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = x + self.pos_embed
+            x = self.pos_drop(x)
+
+            # Pass through the stack of Transformer Engine layers
+            for layer in self.transformer_layers:
+                # TE layers expect a single tensor input
+                x = layer(x)
+            
+            # Final LayerNorm on the CLS token output
+            # We take the output corresponding to the [CLS] token
+            cls_output = self.norm(x[:, 0])
+            
+            # Classifier head
+            logits = self.head(cls_output)
+        
+        # Logits are cast back to the original dtype (e.g., FP32) outside the context
+        return logits
+    
 # class Block(nn.Module):
 #     """
 #     带有LayerScale的Transformer块 (Pre-Norm结构)。
@@ -272,3 +388,93 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         # layer_scale_init_value=float(model_config['layer_scale_init_value'])
     )
     return model
+
+def create_vit_te_model(config: Dict) -> VisionTransformerTE:
+    """
+    Factory function to create a VisionTransformerTE from a config dictionary.
+    """
+    model_config = config['model']
+    model = VisionTransformerTE(
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_channels=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        num_classes=model_config['num_classes'],
+        dropout=model_config.get('dropout', 0.1)
+    )
+    return model
+
+# Example of how to instantiate and test the model, including backward pass
+if __name__ == '__main__':
+    # Ensure CUDA is available
+    if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
+        device = torch.device("cuda")
+        batch_size = 2 # Example batch size
+        num_classes = 1000
+        
+        # Define a model configuration
+        vit_b_16_config = {
+            'model': {
+                'img_size': 224,
+                'patch_size': 16,
+                'embed_dim': 768,
+                'depth': 12,
+                'num_heads': 12,
+                'num_classes': num_classes,
+                'dropout': 0.1
+            }
+        }
+
+        # Instantiate the Transformer Engine ViT model using the factory
+        model = create_vit_te_model(vit_b_16_config).to(device)
+        # For a real training scenario, you would also wrap the model with DDP
+        # and torch.compile, e.g.:
+        # model = torch.nn.parallel.DistributedDataParallel(model)
+        # model = torch.compile(model)
+
+
+        print("Model Instantiated on CUDA with Transformer Engine layers via factory.")
+
+        # --- Verification Step ---
+        print("\n--- Running Verification: Forward and Backward Pass ---")
+        try:
+            # 1. Create dummy input and labels
+            dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
+            dummy_labels = torch.randint(0, num_classes, (batch_size,), device=device)
+            loss_fn = nn.CrossEntropyLoss()
+
+            # 2. Perform a forward pass
+            # The fp8_autocast is handled inside the model's forward method
+            output = model(dummy_input)
+            print(f"Forward pass successful!")
+            print(f"Output shape: {output.shape}") # Expected: [2, 1000]
+            print(f"Output dtype: {output.dtype}") # Expected: torch.float32
+
+            # 3. Calculate loss
+            # Note: The backward pass must be outside the fp8_autocast context
+            loss = loss_fn(output, dummy_labels)
+            print(f"Loss calculated: {loss.item():.4f}")
+
+            # 4. Perform a backward pass
+            loss.backward()
+            print("Backward pass successful!")
+
+            # 5. Verify gradients
+            # Check if the gradient of the final linear layer's weight exists
+            if model.head.weight.grad is not None:
+                print("Gradient check PASSED. Gradients were computed for the head layer.")
+            else:
+                print("Gradient check FAILED. No gradients found for the head layer.")
+            
+            print("\nEnvironment and model code verified for a full training step. ✅")
+
+        except Exception as e:
+            print(f"\nAn error occurred during verification: {e}")
+            import traceback
+            traceback.print_exc()
+
+    else:
+        print("CUDA with Hopper architecture (FP8/BF16 support) not available. This model requires an H100 GPU.")

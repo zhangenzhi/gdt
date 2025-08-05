@@ -1,0 +1,54 @@
+# =================================================================
+# == Configuration for ViT-B/16 FP8 Training on NVIDIA H100      ==
+# =================================================================
+# This configuration is optimized for the provided FP8 training script
+# utilizing Transformer Engine.
+
+# A name for this specific experiment run, used for creating output directories
+task_name: "vit_b_16_imagenet_fp8_h100"
+
+# 1. Model Architecture Configuration
+# These parameters define the standard ViT-Base model.
+model:
+  img_size: 256
+  patch_size: 16
+  in_channels: 3
+  embed_dim: 768
+  depth: 12
+  num_heads: 12
+  mlp_ratio: 4.0
+  num_classes: 1000
+
+# 2. Training Hyperparameters & Optimization Flags
+training:
+  # --- Optimizer Settings ---
+  optimizer: "AdamW"
+  # Note: The learning rate might require tuning for FP8. 
+  # This value is a starting point. For large batch sizes, a linear scaling rule
+  # (e.g., base_lr * global_batch_size / 256) is often applied.
+  learning_rate: 0.0012
+  # Betas recommended for AdamW stability in large-scale training.
+  betas: [0.9, 0.95]
+  # A high weight decay is common and effective for ViT training.
+  weight_decay: 0.3
+  # Standard label smoothing for ImageNet classification.
+  label_smoothing: 0.1
+  
+  # --- Scheduler Settings ---
+  # Number of epochs for the learning rate to warm up linearly.
+  warmup_epochs: 20 
+
+  # --- Run Settings ---
+  num_epochs: 300
+  # e.g., for 4 GPUs, per-device batch size will be 768.
+  batch_size: 768 
+  # Use gradient accumulation to simulate a larger effective batch size
+  # without increasing memory usage.
+  # effective_batch_size = batch_size * gradient_accumulation_steps
+  gradient_accumulation_steps: 1
+
+  # --- Performance Optimization Flags ---
+  # Recommended: Enable torch.compile for end-to-end model optimization.
+  use_compile: true
+  # Recommended: Enable Apex's FusedAdam for faster optimizer steps on CUDA.
+  use_fused_optimizer: true
