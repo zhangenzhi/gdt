@@ -128,7 +128,6 @@ class VisionTransformerTE(nn.Module):
             ) for _ in range(depth)
         ])
 
-        # CORRECTED: Pad the output features of the final linear layer to be a multiple of 16.
         padded_num_classes = (num_classes + 15) & -16
         
         self.norm = te.LayerNorm(embed_dim)
@@ -136,6 +135,12 @@ class VisionTransformerTE(nn.Module):
 
         self.apply(self._init_weights)
         
+        # CORRECTED: Perform hardware check once during initialization to avoid torch.compile error.
+        # This prevents the dynamic hardware check from running inside the compiled forward pass.
+        self.fp8_enabled, reason = te.is_fp8_available()
+        if not self.fp8_enabled:
+            print(f"Warning: FP8 training is not available. Reason: {reason}")
+
         self.fp8_recipe = recipe.DelayedScaling(
             margin=0, 
             interval=1, 
@@ -154,7 +159,8 @@ class VisionTransformerTE(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
-        with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
+        # CORRECTED: Use the pre-checked boolean flag for the `enabled` argument.
+        with te.fp8_autocast(enabled=self.fp8_enabled, fp8_recipe=self.fp8_recipe):
             B = x.shape[0]
             x = self.patch_embed(x)
 
@@ -174,31 +180,11 @@ class VisionTransformerTE(nn.Module):
             
             cls_output = self.norm(x[:, 0])
             
-            # Get padded logits from the head
             logits_padded = self.head(cls_output)
             
-            # CORRECTED: Slice the output back to the original number of classes
             logits = logits_padded[:, :self.num_classes]
         
         return logits
-
-def create_vit_te_model(config: Dict) -> VisionTransformerTE:
-    """
-    Factory function to create a VisionTransformerTE from a config dictionary.
-    """
-    model_config = config['model']
-    model = VisionTransformerTE(
-        img_size=model_config['img_size'],
-        patch_size=model_config['patch_size'],
-        in_channels=model_config.get('in_channels', 3),
-        embed_dim=model_config['embed_dim'],
-        depth=model_config['depth'],
-        num_heads=model_config['num_heads'],
-        mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        num_classes=model_config['num_classes'],
-        dropout=model_config.get('dropout', 0.1)
-    )
-    return model
     
 # class Block(nn.Module):
 #     """
@@ -412,6 +398,8 @@ def create_vit_te_model(config: Dict) -> VisionTransformerTE:
     return model
 
 # Example of how to instantiate and test the model, including backward pass
+# batch size, num_class all need to be 8/16 times.
+
 if __name__ == '__main__':
     # Ensure CUDA is available
     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
