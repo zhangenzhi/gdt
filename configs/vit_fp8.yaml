@@ -41,7 +41,7 @@ training:
   # --- Run Settings ---
   num_epochs: 300
   # e.g., for 4 GPUs, per-device batch size will be 768.
-  batch_size: 128 
+  batch_size: 256 
   # Use gradient accumulation to simulate a larger effective batch size
   # without increasing memory usage.
   # effective_batch_size = batch_size * gradient_accumulation_steps
