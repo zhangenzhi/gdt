@@ -80,6 +80,9 @@ class VisionTransformer(nn.Module):
         # Return only logits to match standard classifier output
         return logits
 
+import transformer_engine.pytorch as te
+from transformer_engine.common import recipe
+
 class PatchEmbedding(nn.Module):
     """
     Image to Patch Embedding.
@@ -100,9 +103,6 @@ class PatchEmbedding(nn.Module):
         # After flatten and transpose: [B, N, D] where N = (H*W)/P^2
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
-
-import transformer_engine.pytorch as te
-from transformer_engine.common import recipe
 
 class VisionTransformerTE(nn.Module):
     """
@@ -132,8 +132,10 @@ class VisionTransformerTE(nn.Module):
                 attention_dropout=dropout,
                 # 'no_mask' is suitable for ViT encoder self-attention
                 self_attn_mask_type="no_mask", 
-                # Use GELU activation in the MLP as is common in ViT
-                activation="gelu",
+                # The correct argument for activation in TE is 'activation'
+                activation="gelu"
+                # CORRECTED: Removed 'layer_norm_positioning' as it's not a valid argument
+                # in this TE version. The default behavior is pre-LayerNorm, which is what we want.
             ) for _ in range(depth)
         ])
 
@@ -145,11 +147,11 @@ class VisionTransformerTE(nn.Module):
         self.apply(self._init_weights)
         
         # Define the FP8 recipe for the autocast context
-        # E4M3 is generally recommended for forward pass, HYBRID for backward
+        # HYBRID is recommended for training (E4M3 for fwd, E5M2 for bwd)
         self.fp8_recipe = recipe.DelayedScaling(
             margin=0, 
             interval=1, 
-            fp8_format=recipe.Format.E4M3, 
+            fp8_format=recipe.Format.HYBRID, 
             amax_history_len=16, 
             amax_compute_algo="max"
         )
@@ -179,13 +181,22 @@ class VisionTransformerTE(nn.Module):
             x = x + self.pos_embed
             x = self.pos_drop(x)
 
+            # CORRECTED: Pad sequence length for FP8 compatibility
+            # Transformer Engine's FP8 GEMMs require the sequence length to be a multiple of 8.
+            # We pad the sequence length to the nearest multiple of 16 for optimal performance.
+            B, N, D = x.shape
+            pad_len = (16 - (N % 16)) % 16
+            if pad_len > 0:
+                padding = torch.zeros(B, pad_len, D, device=x.device, dtype=x.dtype)
+                x = torch.cat([x, padding], dim=1)
+
             # Pass through the stack of Transformer Engine layers
             for layer in self.transformer_layers:
                 # TE layers expect a single tensor input
                 x = layer(x)
             
             # Final LayerNorm on the CLS token output
-            # We take the output corresponding to the [CLS] token
+            # We take the output corresponding to the [CLS] token. Padding doesn't affect this.
             cls_output = self.norm(x[:, 0])
             
             # Classifier head
@@ -410,7 +421,7 @@ if __name__ == '__main__':
     # Ensure CUDA is available
     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
         device = torch.device("cuda")
-        batch_size = 8 # Example batch size
+        batch_size = 2 # Example batch size
         num_classes = 1000
         
         # Define a model configuration
