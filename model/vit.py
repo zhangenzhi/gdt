@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from typing import List, Dict
 from torch.utils.checkpoint import checkpoint
+from timm.models.layers import DropPath
 
 class PatchEmbedding(nn.Module):
     """

@@ -9,6 +9,13 @@ import torch
 from torch import nn
 import torch.utils.data as data
 import torchvision.transforms as transforms
+from timm.data.mixup import Mixup
+mixup_fn = Mixup(
+    mixup_alpha=0.8,
+    cutmix_alpha=1.0,
+    prob=1.0,              # 总使用概率
+    switch_prob=0.5        # mixup vs cutmix 切换概率
+)
 
 import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
@@ -64,6 +71,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         
         for i, (images, labels) in enumerate(train_loader):
             is_accumulation_step = (i + 1) % accumulation_steps != 0
+            images, labels = mixup_fn(images, labels)
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
             sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
