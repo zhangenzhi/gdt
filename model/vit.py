@@ -87,7 +87,6 @@ class PatchEmbedding(nn.Module):
     """
     Image to Patch Embedding.
     Converts a 2D image into a 1D sequence of patch embeddings.
-    (This module remains unchanged as Conv2d is not the primary target for TE FP8 acceleration)
     """
     def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768):
         super().__init__()
@@ -95,12 +94,9 @@ class PatchEmbedding(nn.Module):
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
         
-        # Use a single Conv2d layer for efficient patch embedding
         self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        # x shape: [B, C, H, W] -> After proj: [B, D, H/P, W/P]
-        # After flatten and transpose: [B, N, D] where N = (H*W)/P^2
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
@@ -111,18 +107,15 @@ class VisionTransformerTE(nn.Module):
     def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
         super().__init__()
         self.embed_dim = embed_dim
+        self.num_classes = num_classes # Store original number of classes
         
-        # 1. Patch Embedding (unchanged)
         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        # 2. Special tokens and positional embeddings (unchanged)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.pos_drop = nn.Dropout(p=dropout)
 
-        # 3. Transformer Encoder replaced with Transformer Engine's TransformerLayer
-        # We create a ModuleList of TE layers.
         self.transformer_layers = nn.ModuleList([
             te.TransformerLayer(
                 hidden_size=embed_dim,
@@ -130,24 +123,19 @@ class VisionTransformerTE(nn.Module):
                 num_attention_heads=num_heads,
                 hidden_dropout=dropout,
                 attention_dropout=dropout,
-                # 'no_mask' is suitable for ViT encoder self-attention
                 self_attn_mask_type="no_mask", 
-                # The correct argument for activation in TE is 'activation'
                 activation="gelu"
-                # CORRECTED: Removed 'layer_norm_positioning' as it's not a valid argument
-                # in this TE version. The default behavior is pre-LayerNorm, which is what we want.
             ) for _ in range(depth)
         ])
 
-        # 4. Classifier Head replaced with TE's LayerNorm and Linear
+        # CORRECTED: Pad the output features of the final linear layer to be a multiple of 16.
+        padded_num_classes = (num_classes + 15) & -16
+        
         self.norm = te.LayerNorm(embed_dim)
-        self.head = te.Linear(embed_dim, num_classes, bias=True)
+        self.head = te.Linear(embed_dim, padded_num_classes, bias=True)
 
-        # Initialize weights (can use a similar scheme)
         self.apply(self._init_weights)
         
-        # Define the FP8 recipe for the autocast context
-        # HYBRID is recommended for training (E4M3 for fwd, E5M2 for bwd)
         self.fp8_recipe = recipe.DelayedScaling(
             margin=0, 
             interval=1, 
@@ -156,10 +144,7 @@ class VisionTransformerTE(nn.Module):
             amax_compute_algo="max"
         )
 
-
     def _init_weights(self, m):
-        # TE modules have their own optimized initializations, 
-        # but we can still initialize standard modules if needed.
         if isinstance(m, nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
@@ -169,41 +154,51 @@ class VisionTransformerTE(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
-        # 5. The forward pass is wrapped in the fp8_autocast context manager
-        # This enables FP8 execution for all TE modules within this block.
         with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
             B = x.shape[0]
             x = self.patch_embed(x)
 
-            # Prepend CLS token and add positional embedding
             cls_tokens = self.cls_token.expand(B, -1, -1)
             x = torch.cat((cls_tokens, x), dim=1)
             x = x + self.pos_embed
             x = self.pos_drop(x)
 
-            # CORRECTED: Pad sequence length for FP8 compatibility
-            # Transformer Engine's FP8 GEMMs require the sequence length to be a multiple of 8.
-            # We pad the sequence length to the nearest multiple of 16 for optimal performance.
             B, N, D = x.shape
             pad_len = (16 - (N % 16)) % 16
             if pad_len > 0:
                 padding = torch.zeros(B, pad_len, D, device=x.device, dtype=x.dtype)
                 x = torch.cat([x, padding], dim=1)
 
-            # Pass through the stack of Transformer Engine layers
             for layer in self.transformer_layers:
-                # TE layers expect a single tensor input
                 x = layer(x)
             
-            # Final LayerNorm on the CLS token output
-            # We take the output corresponding to the [CLS] token. Padding doesn't affect this.
             cls_output = self.norm(x[:, 0])
             
-            # Classifier head
-            logits = self.head(cls_output)
+            # Get padded logits from the head
+            logits_padded = self.head(cls_output)
+            
+            # CORRECTED: Slice the output back to the original number of classes
+            logits = logits_padded[:, :self.num_classes]
         
-        # Logits are cast back to the original dtype (e.g., FP32) outside the context
         return logits
+
+def create_vit_te_model(config: Dict) -> VisionTransformerTE:
+    """
+    Factory function to create a VisionTransformerTE from a config dictionary.
+    """
+    model_config = config['model']
+    model = VisionTransformerTE(
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_channels=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        num_classes=model_config['num_classes'],
+        dropout=model_config.get('dropout', 0.1)
+    )
+    return model
     
 # class Block(nn.Module):
 #     """
