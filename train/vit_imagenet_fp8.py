@@ -86,7 +86,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             _, predicted = torch.max(outputs.data, 1)
             running_total += labels.size(0)
             running_corrects += (predicted == labels).sum().item()
-            running_loss += loss.item() * accumulation_steps # De-normalize for logging
+            running_loss += loss.detach().item() * accumulation_steps # De-normalize for logging
 
             if (i + 1) % 10 == 0 and is_main_process:
                 train_acc = 100 * running_corrects / running_total if running_total > 0 else 0
