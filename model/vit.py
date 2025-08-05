@@ -135,8 +135,20 @@ class VisionTransformerTE(nn.Module):
 
         self.apply(self._init_weights)
         
-        # CORRECTED: Removed the explicit call to te.is_fp8_available() to fix the AttributeError.
-        # The fp8_autocast context manager will handle the check internally.
+        # CORRECTED: Use a try-except block for robust hardware checking.
+        # This makes the model compatible with torch.compile on newer TE versions
+        # while maintaining compatibility with older versions.
+        try:
+            self.fp8_enabled, reason = te.is_fp8_available()
+            if not self.fp8_enabled:
+                print(f"Warning: FP8 training is not available. Reason: {reason}")
+        except AttributeError:
+            print("Warning: 'transformer_engine.is_fp8_available()' not found.")
+            print("This may be due to an older version of TE. FP8 will be enabled by default.")
+            print("Note: Using torch.compile with this version may cause errors.")
+            self.fp8_enabled = True
+
+
         self.fp8_recipe = recipe.DelayedScaling(
             margin=0, 
             interval=1, 
@@ -155,9 +167,8 @@ class VisionTransformerTE(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
-        # CORRECTED: Set enabled=True directly. The context manager will perform the
-        # necessary hardware checks internally, compatible with older TE versions.
-        with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
+        # Use the pre-checked boolean flag for the `enabled` argument.
+        with te.fp8_autocast(enabled=self.fp8_enabled, fp8_recipe=self.fp8_recipe):
             B = x.shape[0]
             x = self.patch_embed(x)
 
