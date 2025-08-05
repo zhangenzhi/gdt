@@ -273,20 +273,20 @@ def vit_imagenet_train_single(args, config):
     criterion = nn.CrossEntropyLoss(label_smoothing=config['training'].get('label_smoothing', 0.1))
 
     use_fused = config['training'].get('use_fused_optimizer', False)
-    import bitsandbytes as bnb
-    optimizer = bnb.optim.AdamW8bit(
-    model.parameters(), 
-    lr=config['training']['learning_rate'], 
-    weight_decay=config['training']['weight_decay'],
-    betas=tuple(config['training'].get('betas', (0.9, 0.999))),
-    )
-    # optimizer = torch.optim.AdamW(
-    #     model.parameters(), 
-    #     lr=config['training']['learning_rate'], 
-    #     weight_decay=config['training']['weight_decay'],
-    #     betas=tuple(config['training'].get('betas', (0.9, 0.999))),
-    #     fused=use_fused # 在CUDA上可用时自动启用融合内核
+    # import bitsandbytes as bnb
+    # optimizer = bnb.optim.AdamW8bit(
+    # model.parameters(), 
+    # lr=config['training']['learning_rate'], 
+    # weight_decay=config['training']['weight_decay'],
+    # betas=tuple(config['training'].get('betas', (0.9, 0.999))),
     # )
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=config['training']['learning_rate'], 
+        weight_decay=config['training']['weight_decay'],
+        betas=tuple(config['training'].get('betas', (0.9, 0.999))),
+        fused=use_fused # 在CUDA上可用时自动启用融合内核
+    )
     
      # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
     training_config = config['training']
