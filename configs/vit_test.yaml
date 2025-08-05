@@ -18,7 +18,7 @@ model:
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.0012 # (1e-4 base_lr*bz/256)
+  learning_rate: 0.0026 # (1e-4 base_lr*bz/256)
   betas: [0.9, 0.95]
   weight_decay: 0.3
   label_smoothing: 0.1
@@ -29,4 +29,4 @@ training:
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 2
