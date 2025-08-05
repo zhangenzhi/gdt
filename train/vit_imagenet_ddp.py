@@ -10,12 +10,6 @@ from torch import nn
 import torch.utils.data as data
 import torchvision.transforms as transforms
 from timm.data.mixup import Mixup
-mixup_fn = Mixup(
-    mixup_alpha=0.8,
-    cutmix_alpha=1.0,
-    prob=1.0,              # 总使用概率
-    switch_prob=0.5        # mixup vs cutmix 切换概率
-)
 
 import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
@@ -52,7 +46,15 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
-
+    
+    mixup_fn = Mixup(
+        mixup_alpha=0.8,
+        cutmix_alpha=1.0,
+        label_smoothing=0.1,
+        prob=1.0,              # 总使用概率
+        switch_prob=0.5        # mixup vs cutmix 切换概率
+    )
+    
     # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
@@ -71,15 +73,22 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         
         for i, (images, labels) in enumerate(train_loader):
             is_accumulation_step = (i + 1) % accumulation_steps != 0
-            images, labels = mixup_fn(images, labels)
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
+            
+            original_labels = labels.clone()
+            # *** 修改: 应用Mixup/CutMix ***
+            if mixup_fn:
+                images, soft_labels = mixup_fn(images, labels)
+            else:
+                soft_labels = nn.functional.one_hot(labels, config['model']['num_classes']).float()
+                
             sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     outputs = model(images)
-                    loss = criterion(outputs, labels)
+                    loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
                 
                 scaler.scale(loss).backward()
@@ -91,8 +100,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 if scheduler: scheduler.step()
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
-            running_total += labels.size(0)
-            running_corrects += (predicted == labels).sum().item()
+            running_total += original_labels.size(0)
+            running_corrects += (predicted == original_labels).sum().item()
             # 注意：loss.item() 会自动返回未缩放的、float32类型的损失值
             running_loss += loss.item() * accumulation_steps
 
@@ -278,7 +287,8 @@ def vit_imagenet_train_single(args, config):
         else:
             model = DDP(model)
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=config['training'].get('label_smoothing', 0.1))
+    # criterion = nn.CrossEntropyLoss(label_smoothing=config['training'].get('label_smoothing', 0.0))
+    criterion = nn.CrossEntropyLoss()
 
     use_fused = config['training'].get('use_fused_optimizer', False)
     # import bitsandbytes as bnb
