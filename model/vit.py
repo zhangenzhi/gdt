@@ -135,12 +135,8 @@ class VisionTransformerTE(nn.Module):
 
         self.apply(self._init_weights)
         
-        # CORRECTED: Perform hardware check once during initialization to avoid torch.compile error.
-        # This prevents the dynamic hardware check from running inside the compiled forward pass.
-        self.fp8_enabled, reason = te.is_fp8_available()
-        if not self.fp8_enabled:
-            print(f"Warning: FP8 training is not available. Reason: {reason}")
-
+        # CORRECTED: Removed the explicit call to te.is_fp8_available() to fix the AttributeError.
+        # The fp8_autocast context manager will handle the check internally.
         self.fp8_recipe = recipe.DelayedScaling(
             margin=0, 
             interval=1, 
@@ -159,8 +155,9 @@ class VisionTransformerTE(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
-        # CORRECTED: Use the pre-checked boolean flag for the `enabled` argument.
-        with te.fp8_autocast(enabled=self.fp8_enabled, fp8_recipe=self.fp8_recipe):
+        # CORRECTED: Set enabled=True directly. The context manager will perform the
+        # necessary hardware checks internally, compatible with older TE versions.
+        with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
             B = x.shape[0]
             x = self.patch_embed(x)
 
