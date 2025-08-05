@@ -51,4 +51,4 @@ training:
   # Recommended: Enable torch.compile for end-to-end model optimization.
   use_compile: false
   # Recommended: Enable Apex's FusedAdam for faster optimizer steps on CUDA.
-  use_fused_optimizer: true
+  use_fused_optimizer: false
