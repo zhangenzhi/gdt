@@ -133,7 +133,7 @@ class VisionTransformerTE(nn.Module):
                 # 'no_mask' is suitable for ViT encoder self-attention
                 self_attn_mask_type="no_mask", 
                 # Use GELU activation in the MLP as is common in ViT
-                hidden_act="gelu",
+                activation="gelu",
                 # LayerNorm is applied before sub-modules (Attention, MLP)
                 layer_norm_positioning='pre'
             ) for _ in range(depth)
