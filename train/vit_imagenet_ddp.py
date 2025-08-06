@@ -124,7 +124,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 
         if is_main_process:
             current_lr = optimizer.param_groups[0]['lr']
-            logging.info(f"Epoch {epoch + 1}/{num_epochs} | VAL ACC: {val_acc:.4f} | current_lr: {current_lr:.6f}")
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | current_lr: {current_lr:.6f}")
             
             # *** 修改: 完整的检查点保存逻辑 ***
             checkpoint_dir = os.path.join(args.output, args.savefile)
