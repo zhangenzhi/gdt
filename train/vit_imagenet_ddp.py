@@ -201,7 +201,12 @@ def vit_imagenet_train(args, config):
 
     args.img_size = config['model']['img_size']
     args.batch_size = config['training']['batch_size']
-    dataloaders = imagenet_distribute(args=args)
+    
+    dataloaders = imagenet_distribute(
+    img_size=args.img_size,
+    data_dir=args.data_dir,
+    batch_size=args.batch_size,
+    num_workers=args.num_workers)
 
     model = create_vit_model(config)
     
@@ -215,10 +220,63 @@ def vit_imagenet_train(args, config):
     model = DDP(model, device_ids=[device_id])
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
-    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
+    
+    use_fused = config['training'].get('use_fused_optimizer', False)
+    optimizer = torch.optim.AdamW(
+            model.parameters(), 
+            lr=config['training']['learning_rate'], 
+            weight_decay=config['training']['weight_decay'],
+            betas=tuple(config['training'].get('betas', (0.9, 0.999))),
+            fused=use_fused # 在CUDA上可用时自动启用融合内核
+        )
+        
+    # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
+    training_config = config['training']
+    num_epochs = training_config['num_epochs']
+    warmup_epochs = training_config.get('warmup_epochs', 0)
+    
+    # 计算总的训练步数和预热步数
+    steps_per_epoch = len(dataloaders['train'])
+    num_training_steps = num_epochs * steps_per_epoch
+    num_warmup_steps = warmup_epochs * steps_per_epoch
+    
+    if num_warmup_steps > 0:
+        # 预热调度器：从一个很小的值线性增长到1
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        # 主调度器：在预热结束后，进行余弦退火
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
+        # 使用SequentialLR将两者串联起来
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
+    else:
+        # 如果不使用预热，则只使用余弦退火
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+        
+    # *** 新增: 完整的检查点加载逻辑 ***
+    start_epoch = 0
+    best_val_acc = 0.0
+    checkpoint_dir = os.path.join(args.output, args.savefile)
+    checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
+    # checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
 
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=True)
+    if args.reload and os.path.exists(checkpoint_path):
+        if dist.get_rank() == 0:
+            logging.info(f"从检查点恢复训练: {checkpoint_path}")
+        
+        # 加载到CPU以避免GPU内存冲突，并确保所有进程加载相同的权重
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        
+        # 加载模型权重 (注意要加载到 model.module)
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_acc = checkpoint['best_val_acc']
+        
+        if dist.get_rank() == 0:
+            logging.info(f"成功恢复，将从 Epoch {start_epoch + 1} 开始。")
+            
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
 def vit_imagenet_train_local(args, config):
@@ -327,7 +385,7 @@ def vit_imagenet_train_single(args, config):
         # 如果不使用预热，则只使用余弦退火
         scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
     
-        # *** 修改: 创建包含线性预热和多步衰减的组合调度器 ***
+    # *** 修改: 创建包含线性预热和多步衰减的组合调度器 ***
     
     # training_config = config['training']
     # num_epochs = training_config['num_epochs']
