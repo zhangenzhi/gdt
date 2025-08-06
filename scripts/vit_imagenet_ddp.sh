@@ -35,6 +35,6 @@ echo "Launching distributed training..."
 srun -N 8 -n 64 --ntasks-per-node 8 python ./train/vit_imagenet_ddp.py \
     --config ./configs/vit_imagenet_ddp.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --savefile vit-n8-256 \
+    --savefile vit-n8-bz256-he \
     --num_workers 32 \
     --reload
