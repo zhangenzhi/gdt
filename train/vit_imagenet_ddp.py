@@ -59,7 +59,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
     if is_main_process:
-        # 在日志中注明正在使用混合精度
         logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)   
         logging.info("开始BF16优化训练...")
         logging.info(f"torch.compile: {config['training'].get('use_compile', False)}, Fused Optimizer: {config['training'].get('use_fused_optimizer', False)}, Activation Checkpointing: {config['training'].get('use_checkpointing', False)}")

@@ -81,119 +81,119 @@ class VisionTransformer(nn.Module):
         # Return only logits to match standard classifier output
         return logits
 
-import transformer_engine.pytorch as te
-from transformer_engine.common import recipe
+# import transformer_engine.pytorch as te
+# from transformer_engine.common import recipe
 
-class PatchEmbedding(nn.Module):
-    """
-    Image to Patch Embedding.
-    Converts a 2D image into a 1D sequence of patch embeddings.
-    """
-    def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768):
-        super().__init__()
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = (img_size // patch_size) ** 2
+# class PatchEmbedding(nn.Module):
+#     """
+#     Image to Patch Embedding.
+#     Converts a 2D image into a 1D sequence of patch embeddings.
+#     """
+#     def __init__(self, img_size=224, patch_size=16, in_channels=3, embed_dim=768):
+#         super().__init__()
+#         self.img_size = img_size
+#         self.patch_size = patch_size
+#         self.num_patches = (img_size // patch_size) ** 2
         
-        self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
+#         self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, x):
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+#     def forward(self, x):
+#         x = self.proj(x).flatten(2).transpose(1, 2)
+#         return x
 
-class VisionTransformerTE(nn.Module):
-    """
-    Vision Transformer optimized with NVIDIA Transformer Engine for FP8 training.
-    """
-    def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_classes = num_classes # Store original number of classes
+# class VisionTransformerTE(nn.Module):
+#     """
+#     Vision Transformer optimized with NVIDIA Transformer Engine for FP8 training.
+#     """
+#     def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
+#         super().__init__()
+#         self.embed_dim = embed_dim
+#         self.num_classes = num_classes # Store original number of classes
         
-        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
-        num_patches = self.patch_embed.num_patches
+#         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
+#         num_patches = self.patch_embed.num_patches
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
-        self.pos_drop = nn.Dropout(p=dropout)
+#         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+#         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+#         self.pos_drop = nn.Dropout(p=dropout)
 
-        self.transformer_layers = nn.ModuleList([
-            te.TransformerLayer(
-                hidden_size=embed_dim,
-                ffn_hidden_size=int(embed_dim * mlp_ratio),
-                num_attention_heads=num_heads,
-                hidden_dropout=dropout,
-                attention_dropout=dropout,
-                self_attn_mask_type="no_mask", 
-                activation="gelu"
-            ) for _ in range(depth)
-        ])
+#         self.transformer_layers = nn.ModuleList([
+#             te.TransformerLayer(
+#                 hidden_size=embed_dim,
+#                 ffn_hidden_size=int(embed_dim * mlp_ratio),
+#                 num_attention_heads=num_heads,
+#                 hidden_dropout=dropout,
+#                 attention_dropout=dropout,
+#                 self_attn_mask_type="no_mask", 
+#                 activation="gelu"
+#             ) for _ in range(depth)
+#         ])
 
-        padded_num_classes = (num_classes + 15) & -16
+#         padded_num_classes = (num_classes + 15) & -16
         
-        self.norm = te.LayerNorm(embed_dim)
-        self.head = te.Linear(embed_dim, padded_num_classes, bias=True)
+#         self.norm = te.LayerNorm(embed_dim)
+#         self.head = te.Linear(embed_dim, padded_num_classes, bias=True)
 
-        self.apply(self._init_weights)
+#         self.apply(self._init_weights)
         
-        # CORRECTED: Use a try-except block for robust hardware checking.
-        # This makes the model compatible with torch.compile on newer TE versions
-        # while maintaining compatibility with older versions.
-        try:
-            self.fp8_enabled, reason = te.is_fp8_available()
-            if not self.fp8_enabled:
-                print(f"Warning: FP8 training is not available. Reason: {reason}")
-        except AttributeError:
-            print("Warning: 'transformer_engine.is_fp8_available()' not found.")
-            print("This may be due to an older version of TE. FP8 will be enabled by default.")
-            print("Note: Using torch.compile with this version may cause errors.")
-            self.fp8_enabled = True
+#         # CORRECTED: Use a try-except block for robust hardware checking.
+#         # This makes the model compatible with torch.compile on newer TE versions
+#         # while maintaining compatibility with older versions.
+#         try:
+#             self.fp8_enabled, reason = te.is_fp8_available()
+#             if not self.fp8_enabled:
+#                 print(f"Warning: FP8 training is not available. Reason: {reason}")
+#         except AttributeError:
+#             print("Warning: 'transformer_engine.is_fp8_available()' not found.")
+#             print("This may be due to an older version of TE. FP8 will be enabled by default.")
+#             print("Note: Using torch.compile with this version may cause errors.")
+#             self.fp8_enabled = True
 
 
-        self.fp8_recipe = recipe.DelayedScaling(
-            margin=0, 
-            interval=1, 
-            fp8_format=recipe.Format.HYBRID, 
-            amax_history_len=16, 
-            amax_compute_algo="max"
-        )
+#         self.fp8_recipe = recipe.DelayedScaling(
+#             margin=0, 
+#             interval=1, 
+#             fp8_format=recipe.Format.HYBRID, 
+#             amax_history_len=16, 
+#             amax_compute_algo="max"
+#         )
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform_(m.weight)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+#     def _init_weights(self, m):
+#         if isinstance(m, nn.Linear):
+#             torch.nn.init.xavier_uniform_(m.weight)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.LayerNorm):
+#             nn.init.constant_(m.bias, 0)
+#             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x):
-        # Use the pre-checked boolean flag for the `enabled` argument.
-        with te.fp8_autocast(enabled=self.fp8_enabled, fp8_recipe=self.fp8_recipe):
-            B = x.shape[0]
-            x = self.patch_embed(x)
+#     def forward(self, x):
+#         # Use the pre-checked boolean flag for the `enabled` argument.
+#         with te.fp8_autocast(enabled=self.fp8_enabled, fp8_recipe=self.fp8_recipe):
+#             B = x.shape[0]
+#             x = self.patch_embed(x)
 
-            cls_tokens = self.cls_token.expand(B, -1, -1)
-            x = torch.cat((cls_tokens, x), dim=1)
-            x = x + self.pos_embed
-            x = self.pos_drop(x)
+#             cls_tokens = self.cls_token.expand(B, -1, -1)
+#             x = torch.cat((cls_tokens, x), dim=1)
+#             x = x + self.pos_embed
+#             x = self.pos_drop(x)
 
-            B, N, D = x.shape
-            pad_len = (16 - (N % 16)) % 16
-            if pad_len > 0:
-                padding = torch.zeros(B, pad_len, D, device=x.device, dtype=x.dtype)
-                x = torch.cat([x, padding], dim=1)
+#             B, N, D = x.shape
+#             pad_len = (16 - (N % 16)) % 16
+#             if pad_len > 0:
+#                 padding = torch.zeros(B, pad_len, D, device=x.device, dtype=x.dtype)
+#                 x = torch.cat([x, padding], dim=1)
 
-            for layer in self.transformer_layers:
-                x = layer(x)
+#             for layer in self.transformer_layers:
+#                 x = layer(x)
             
-            cls_output = self.norm(x[:, 0])
+#             cls_output = self.norm(x[:, 0])
             
-            logits_padded = self.head(cls_output)
+#             logits_padded = self.head(cls_output)
             
-            logits = logits_padded[:, :self.num_classes]
+#             logits = logits_padded[:, :self.num_classes]
         
-        return logits
+#         return logits
     
 # class Block(nn.Module):
 #     """
@@ -388,93 +388,93 @@ def create_vit_model(config: Dict) -> VisionTransformer:
     )
     return model
 
-def create_vit_te_model(config: Dict) -> VisionTransformerTE:
-    """
-    Factory function to create a VisionTransformerTE from a config dictionary.
-    """
-    model_config = config['model']
-    model = VisionTransformerTE(
-        img_size=model_config['img_size'],
-        patch_size=model_config['patch_size'],
-        in_channels=model_config.get('in_channels', 3),
-        embed_dim=model_config['embed_dim'],
-        depth=model_config['depth'],
-        num_heads=model_config['num_heads'],
-        mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        num_classes=model_config['num_classes'],
-        dropout=model_config.get('dropout', 0.1)
-    )
-    return model
+# def create_vit_te_model(config: Dict) -> VisionTransformerTE:
+#     """
+#     Factory function to create a VisionTransformerTE from a config dictionary.
+#     """
+#     model_config = config['model']
+#     model = VisionTransformerTE(
+#         img_size=model_config['img_size'],
+#         patch_size=model_config['patch_size'],
+#         in_channels=model_config.get('in_channels', 3),
+#         embed_dim=model_config['embed_dim'],
+#         depth=model_config['depth'],
+#         num_heads=model_config['num_heads'],
+#         mlp_ratio=model_config.get('mlp_ratio', 4.0),
+#         num_classes=model_config['num_classes'],
+#         dropout=model_config.get('dropout', 0.1)
+#     )
+#     return model
 
-# Example of how to instantiate and test the model, including backward pass
-# batch size, num_class all need to be 8/16 times.
+# # Example of how to instantiate and test the model, including backward pass
+# # batch size, num_class all need to be 8/16 times.
 
-if __name__ == '__main__':
-    # Ensure CUDA is available
-    if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
-        device = torch.device("cuda")
-        batch_size = 16 # Example batch size
-        num_classes = 1000
+# if __name__ == '__main__':
+#     # Ensure CUDA is available
+#     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
+#         device = torch.device("cuda")
+#         batch_size = 16 # Example batch size
+#         num_classes = 1000
         
-        # Define a model configuration
-        vit_b_16_config = {
-            'model': {
-                'img_size': 224,
-                'patch_size': 16,
-                'embed_dim': 768,
-                'depth': 12,
-                'num_heads': 12,
-                'num_classes': num_classes,
-                'dropout': 0.1
-            }
-        }
+#         # Define a model configuration
+#         vit_b_16_config = {
+#             'model': {
+#                 'img_size': 224,
+#                 'patch_size': 16,
+#                 'embed_dim': 768,
+#                 'depth': 12,
+#                 'num_heads': 12,
+#                 'num_classes': num_classes,
+#                 'dropout': 0.1
+#             }
+#         }
 
-        # Instantiate the Transformer Engine ViT model using the factory
-        model = create_vit_te_model(vit_b_16_config).to(device)
-        # For a real training scenario, you would also wrap the model with DDP
-        # and torch.compile, e.g.:
-        # model = torch.nn.parallel.DistributedDataParallel(model)
-        # model = torch.compile(model)
+#         # Instantiate the Transformer Engine ViT model using the factory
+#         model = create_vit_te_model(vit_b_16_config).to(device)
+#         # For a real training scenario, you would also wrap the model with DDP
+#         # and torch.compile, e.g.:
+#         # model = torch.nn.parallel.DistributedDataParallel(model)
+#         # model = torch.compile(model)
 
-        print("Model Instantiated on CUDA with Transformer Engine layers via factory.")
+#         print("Model Instantiated on CUDA with Transformer Engine layers via factory.")
 
-        # --- Verification Step ---
-        print("\n--- Running Verification: Forward and Backward Pass ---")
-        try:
-            # 1. Create dummy input and labels
-            dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
-            dummy_labels = torch.randint(0, num_classes, (batch_size,), device=device)
-            loss_fn = nn.CrossEntropyLoss()
+#         # --- Verification Step ---
+#         print("\n--- Running Verification: Forward and Backward Pass ---")
+#         try:
+#             # 1. Create dummy input and labels
+#             dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
+#             dummy_labels = torch.randint(0, num_classes, (batch_size,), device=device)
+#             loss_fn = nn.CrossEntropyLoss()
 
-            # 2. Perform a forward pass
-            # The fp8_autocast is handled inside the model's forward method
-            output = model(dummy_input)
-            print(f"Forward pass successful!")
-            print(f"Output shape: {output.shape}") # Expected: [2, 1000]
-            print(f"Output dtype: {output.dtype}") # Expected: torch.float32
+#             # 2. Perform a forward pass
+#             # The fp8_autocast is handled inside the model's forward method
+#             output = model(dummy_input)
+#             print(f"Forward pass successful!")
+#             print(f"Output shape: {output.shape}") # Expected: [2, 1000]
+#             print(f"Output dtype: {output.dtype}") # Expected: torch.float32
 
-            # 3. Calculate loss
-            # Note: The backward pass must be outside the fp8_autocast context
-            loss = loss_fn(output, dummy_labels)
-            print(f"Loss calculated: {loss.item():.4f}")
+#             # 3. Calculate loss
+#             # Note: The backward pass must be outside the fp8_autocast context
+#             loss = loss_fn(output, dummy_labels)
+#             print(f"Loss calculated: {loss.item():.4f}")
 
-            # 4. Perform a backward pass
-            loss.backward()
-            print("Backward pass successful!")
+#             # 4. Perform a backward pass
+#             loss.backward()
+#             print("Backward pass successful!")
 
-            # 5. Verify gradients
-            # Check if the gradient of the final linear layer's weight exists
-            if model.head.weight.grad is not None:
-                print("Gradient check PASSED. Gradients were computed for the head layer.")
-            else:
-                print("Gradient check FAILED. No gradients found for the head layer.")
+#             # 5. Verify gradients
+#             # Check if the gradient of the final linear layer's weight exists
+#             if model.head.weight.grad is not None:
+#                 print("Gradient check PASSED. Gradients were computed for the head layer.")
+#             else:
+#                 print("Gradient check FAILED. No gradients found for the head layer.")
             
-            print("\nEnvironment and model code verified for a full training step. ✅")
+#             print("\nEnvironment and model code verified for a full training step. ✅")
 
-        except Exception as e:
-            print(f"\nAn error occurred during verification: {e}")
-            import traceback
-            traceback.print_exc()
+#         except Exception as e:
+#             print(f"\nAn error occurred during verification: {e}")
+#             import traceback
+#             traceback.print_exc()
 
-    else:
-        print("CUDA with Hopper architecture (FP8/BF16 support) not available. This model requires an H100 GPU.")
+#     else:
+#         print("CUDA with Hopper architecture (FP8/BF16 support) not available. This model requires an H100 GPU.")
