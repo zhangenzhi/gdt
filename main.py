@@ -33,7 +33,7 @@ def main():
         print(f"Error: Configuration file not found at {args.config}")
         sys.exit(1)
 
-    task_name = config.get('task_name', args.task)
+    task_name = config.get('task_name', "others")
     # Use the savefile from args if provided, otherwise use the task_name
     if args.savefile is None:
         args.savefile = task_name
@@ -58,7 +58,7 @@ def main():
             print("--- Launching ViT Baseline in Local Mode. ---")
             vit_imagenet_train_single(args, config)
     else:
-        raise ValueError(f"Unknown task: {args.task}")
+        raise ValueError(f"Unknown task: {task_name}")
 
 if __name__ == '__main__':
     main()
