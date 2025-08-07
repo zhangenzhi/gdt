@@ -32,7 +32,7 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 8 -n 64 --ntasks-per-node 8 python ./train/vit_imagenet_ddp.py \
+srun -N 8 -n 64 --ntasks-per-node 8 python ./main.py \
     --config ./configs/vit_imagenet_ddp.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
     --savefile vit-n8-bz256-he \
