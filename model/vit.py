@@ -388,6 +388,51 @@ def create_vit_model(config: Dict) -> VisionTransformer:
     )
     return model
 
+import timm
+
+def create_timm_vit(
+    img_size=224, 
+    patch_size=16, 
+    in_channels=3, 
+    embed_dim=768, 
+    depth=12, 
+    num_heads=12, 
+    mlp_ratio=4.0, 
+    num_classes=1000, 
+    pretrained=False, # 新增参数：是否加载预训练权重
+    **kwargs
+):
+    """
+    使用 timm.create_model 创建一个 Vision Transformer 模型。
+    
+    这个函数封装了 timm 的调用，使其接口与您自定义的 ViT 类保持一致。
+    timm 会根据 patch_size, embed_dim, depth, num_heads 等参数自动匹配
+    最接近的预定义模型（如 vit_base_patch16_224），然后用您指定的参数覆盖默认值。
+    """
+    
+    # 查找匹配的ViT模型名称，最常见的是 'vit_base_patch16_224'
+    # 'base' 通常意味着 depth=12, embed_dim=768, num_heads=12
+    model_name = 'vit_base_patch16_224' 
+    
+    print(f"正在基于 '{model_name}' 创建模型，并使用自定义参数进行覆盖。")
+    
+    # 使用 timm.create_model 创建模型
+    model = timm.create_model(
+        model_name,
+        pretrained=pretrained,
+        num_classes=num_classes,
+        img_size=img_size,
+        patch_size=patch_size,
+        in_chans=in_channels,
+        embed_dim=embed_dim,
+        depth=depth,
+        num_heads=num_heads,
+        mlp_ratio=mlp_ratio,
+        **kwargs # 允许传入其他timm支持的参数
+    )
+    
+    return model
+
 # def create_vit_te_model(config: Dict) -> VisionTransformerTE:
 #     """
 #     Factory function to create a VisionTransformerTE from a config dictionary.

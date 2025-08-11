@@ -20,7 +20,8 @@ from torch.amp import GradScaler, autocast
 # Import the baseline ViT model and the dataset functions
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
-from model.vit import create_vit_model
+# from model.vit import create_vit_model
+from model.vit import create_timm_vit as create_vit_model
 
 def setup_logging(args):
     """Configures logging to file and console."""
@@ -77,7 +78,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             
             original_labels = labels.clone()
             # *** 修改: 应用Mixup/CutMix ***
-            if mixup_fn:
+            if config['training']['use_mixup']:
                 images, soft_labels = mixup_fn(images, labels)
             else:
                 soft_labels = nn.functional.one_hot(labels, config['model']['num_classes']).float()
@@ -96,7 +97,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
-                if scheduler: scheduler.step()
+                # if scheduler: scheduler.step()
+                
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
             running_total += original_labels.size(0)
@@ -110,8 +112,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 current_lr = optimizer.param_groups[0]['lr']
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%, current_lr: {current_lr:.6f}')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
-                
-        # scheduler.step()
 
         # 调用兼容性更强的评估函数
         val_acc = evaluate_model_compatible(
@@ -225,7 +225,7 @@ def vit_imagenet_train(args, config):
             model.parameters(), 
             lr=config['training']['learning_rate'], 
             weight_decay=config['training']['weight_decay'],
-            betas=tuple(config['training'].get('betas', (0.9, 0.999))),
+            betas=tuple(config['training'].get('betas', (0.9, 0.95))),
             fused=use_fused # 在CUDA上可用时自动启用融合内核
         )
         
@@ -243,7 +243,7 @@ def vit_imagenet_train(args, config):
         # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
@@ -344,17 +344,9 @@ def vit_imagenet_train_single(args, config):
         else:
             model = DDP(model)
 
-    # criterion = nn.CrossEntropyLoss(label_smoothing=config['training'].get('label_smoothing', 0.0))
     criterion = nn.CrossEntropyLoss()
 
     use_fused = config['training'].get('use_fused_optimizer', False)
-    # import bitsandbytes as bnb
-    # optimizer = bnb.optim.AdamW8bit(
-    # model.parameters(), 
-    # lr=config['training']['learning_rate'], 
-    # weight_decay=config['training']['weight_decay'],
-    # betas=tuple(config['training'].get('betas', (0.9, 0.999))),
-    # )
     optimizer = torch.optim.AdamW(
         model.parameters(), 
         lr=config['training']['learning_rate'], 
@@ -377,49 +369,12 @@ def vit_imagenet_train_single(args, config):
         # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=float(config['training'].get('eta_min', 1e-6)))
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
         # 如果不使用预热，则只使用余弦退火
         scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
-    
-    # *** 修改: 创建包含线性预热和多步衰减的组合调度器 ***
-    
-    # training_config = config['training']
-    # num_epochs = training_config['num_epochs']
-    # warmup_epochs = training_config.get('warmup_epochs', 0)
-    
-    # steps_per_epoch = len(dataloaders['train'])
-    # num_training_steps = num_epochs * steps_per_epoch
-    # num_warmup_steps = warmup_epochs * steps_per_epoch
-
-    # if num_warmup_steps > 0:
-    #     # 1. 预热调度器
-    #     warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
-        
-    #     # 2. 主调度器: MultiStepLR
-    #     # 计算衰减点对应的训练步数
-    #     milestone1_step = int(num_epochs * 0.5 * steps_per_epoch)
-    #     milestone2_step = int(num_epochs * 0.75 * steps_per_epoch)
-        
-    #     # MultiStepLR的里程碑需要相对于其自身的起点（即预热结束后）
-    #     main_scheduler_milestones = [
-    #         milestone1_step - num_warmup_steps,
-    #         milestone2_step - num_warmup_steps,
-    #     ]
-    #     # 过滤掉因预热期过长而可能产生的无效（负数）里程碑
-    #     main_scheduler_milestones = [m for m in main_scheduler_milestones if m > 0]
-
-    #     main_scheduler = MultiStepLR(optimizer, milestones=main_scheduler_milestones, gamma=0.1)
-        
-    #     # 3. 使用SequentialLR将两者串联
-    #     scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
-    # else:
-    #     # 如果不使用预热，则只使用MultiStepLR
-    #     milestone1_step = int(num_epochs * 0.5 * steps_per_epoch)
-    #     milestone2_step = int(num_epochs * 0.75 * steps_per_epoch)
-    #     scheduler = MultiStepLR(optimizer, milestones=[milestone1_step, milestone2_step], gamma=0.1)
     
     # *** 新增: 完整的检查点加载逻辑 ***
     start_epoch = 0
