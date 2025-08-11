@@ -97,7 +97,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
-                # if scheduler: scheduler.step()
+                if scheduler and config['training']['use_mixup']: scheduler.step()
                 
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)

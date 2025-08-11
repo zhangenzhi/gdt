@@ -401,15 +401,7 @@ def create_timm_vit(
     num_classes=1000, 
     pretrained=False, # 新增参数：是否加载预训练权重
     **kwargs
-):
-    """
-    使用 timm.create_model 创建一个 Vision Transformer 模型。
-    
-    这个函数封装了 timm 的调用，使其接口与您自定义的 ViT 类保持一致。
-    timm 会根据 patch_size, embed_dim, depth, num_heads 等参数自动匹配
-    最接近的预定义模型（如 vit_base_patch16_224），然后用您指定的参数覆盖默认值。
-    """
-    
+):  
     # 查找匹配的ViT模型名称，最常见的是 'vit_base_patch16_224'
     # 'base' 通常意味着 depth=12, embed_dim=768, num_heads=12
     model_name = 'vit_base_patch16_224' 
