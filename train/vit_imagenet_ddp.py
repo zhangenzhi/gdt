@@ -20,8 +20,8 @@ from torch.amp import GradScaler, autocast
 # Import the baseline ViT model and the dataset functions
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
-from model.vit import create_vit_model
-# from model.vit import create_timm_vit as create_vit_model
+# from model.vit import create_vit_model
+from model.vit import create_timm_vit as create_vit_model
 
 def setup_logging(args):
     """Configures logging to file and console."""

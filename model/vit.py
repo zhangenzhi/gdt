@@ -389,38 +389,26 @@ def create_vit_model(config: Dict) -> VisionTransformer:
     return model
 
 import timm
-
-def create_timm_vit(
-    img_size=224, 
-    patch_size=16, 
-    in_channels=3, 
-    embed_dim=768, 
-    depth=12, 
-    num_heads=12, 
-    mlp_ratio=4.0, 
-    num_classes=1000, 
-    pretrained=False, # 新增参数：是否加载预训练权重
-    **kwargs
-):  
+def create_timm_vit(config):  
     # 查找匹配的ViT模型名称，最常见的是 'vit_base_patch16_224'
     # 'base' 通常意味着 depth=12, embed_dim=768, num_heads=12
     model_name = 'vit_base_patch16_224' 
+    model_config = config['model']
     
     print(f"正在基于 '{model_name}' 创建模型，并使用自定义参数进行覆盖。")
     
     # 使用 timm.create_model 创建模型
     model = timm.create_model(
         model_name,
-        pretrained=pretrained,
-        num_classes=num_classes,
-        img_size=img_size,
-        patch_size=patch_size,
-        in_chans=in_channels,
-        embed_dim=embed_dim,
-        depth=depth,
-        num_heads=num_heads,
-        mlp_ratio=mlp_ratio,
-        **kwargs # 允许传入其他timm支持的参数
+        pretrained=model_config['pretrained'],
+        num_classes=model_config['num_classes'],
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_chans=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
     )
     
     return model
