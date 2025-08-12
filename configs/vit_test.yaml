@@ -31,4 +31,5 @@ training:
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
   use_mixup: True
+  use_finetune: True
   gradient_accumulation_steps: 1

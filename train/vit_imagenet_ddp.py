@@ -97,7 +97,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
-                if scheduler and config['training']['use_mixup']: scheduler.step()
+                if scheduler and not config['training']['use_finetune']: scheduler.step()
                 
             # --- 之后的评估逻辑保持不变 ---
             _, predicted = torch.max(outputs.data, 1)
@@ -411,7 +411,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='vit-b-16-he', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='vit-b-16-he-ft', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=24, help='Number of workers for DataLoader')
