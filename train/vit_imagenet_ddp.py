@@ -53,7 +53,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         cutmix_alpha=1.0,
         label_smoothing=0.1,
         prob=1.0,              # 总使用概率
-        switch_prob=0.5        # mixup vs cutmix 切换概率
+        switch_prob=0.0        # mixup vs cutmix 切换概率
     )
     
     # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
