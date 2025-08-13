@@ -53,7 +53,7 @@ def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(img_size),
-            transforms.RandomHorizontalFlip(),
+            # transforms.RandomHorizontalFlip(),
             transforms.RandAugment(num_ops=9, magnitude=15),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
