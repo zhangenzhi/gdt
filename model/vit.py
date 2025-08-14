@@ -383,7 +383,8 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        num_classes=model_config['num_classes'],        
+        num_classes=model_config['num_classes'],
+        # droppath=model_config.get('droppath', 0.0)        
         # layer_scale_init_value=float(model_config['layer_scale_init_value'])
     )
     return model
@@ -409,6 +410,8 @@ def create_timm_vit(config):
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        droppath=model_config.get('droppath', 0.0),        
+        init_values=model_config.get('layer_scale_init_value')
     )
     
     return model

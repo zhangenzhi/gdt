@@ -13,8 +13,9 @@ model:
   num_heads: 12
   mlp_ratio: 4.0
   num_classes: 1000
+  droppath: 0.1
   pretrained: False
-  # layer_scale_init_value: 1e-6
+  layer_scale_init_value: 1e-6
 
 # 2. Training Hyperparameters
 training:
@@ -31,6 +32,6 @@ training:
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
-  use_mixup: False
+  use_mixup: true
   use_postrain: False
   gradient_accumulation_steps: 1
