@@ -15,7 +15,7 @@ model:
   num_classes: 1000
   drop_path_rate: 0.1
   pretrained: False
-  layer_scale_init_value: 1e-6
+  layer_scale_init_value: 0.000001
 
 # 2. Training Hyperparameters
 training:
