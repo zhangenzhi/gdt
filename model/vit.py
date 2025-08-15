@@ -410,7 +410,7 @@ def create_timm_vit(config):
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        droppath=model_config.get('droppath', 0.0),        
+        drop_path_rate=model_config.get('drop_path_rate', 0.0),        
         init_values=model_config.get('layer_scale_init_value')
     )
     

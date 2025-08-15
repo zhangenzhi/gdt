@@ -13,7 +13,7 @@ model:
   num_heads: 12
   mlp_ratio: 4.0
   num_classes: 1000
-  droppath: 0.1
+  drop_path_rate: 0.1
   pretrained: False
   layer_scale_init_value: 1e-6
 
