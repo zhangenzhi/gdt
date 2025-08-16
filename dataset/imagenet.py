@@ -44,6 +44,25 @@ def imagenet(args):
                    for x in ['train', 'val']}
     return dataloaders
 
+from PIL import Image
+
+def get_val_transform(img_size):
+    # 根据提供的 eval transform 逻辑来构建
+    t = []
+    if img_size <= 224:
+        crop_pct = 224 / 256
+    else:
+        crop_pct = 1.0
+        
+    size = int(img_size / crop_pct)
+    
+    t.append(transforms.Resize(size, interpolation=Image.BICUBIC))
+    t.append(transforms.CenterCrop(img_size))
+    t.append(transforms.ToTensor())
+    t.append(transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
+    
+    return transforms.Compose(t)
+
 # 建议将 num_workers 作为参数传入，而不是依赖外部的 args
 def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
     """
@@ -58,12 +77,7 @@ def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
-        'val': transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(img_size),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
+        'val': get_val_transform(img_size)
     }
 
     # 创建数据集
