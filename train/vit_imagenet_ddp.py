@@ -7,8 +7,6 @@ import contextlib
 
 import torch
 from torch import nn
-import torch.utils.data as data
-import torchvision.transforms as transforms
 from timm.data.mixup import Mixup
 
 import torch.distributed as dist

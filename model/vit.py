@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from typing import List, Dict
+from functools import partial
 from torch.utils.checkpoint import checkpoint
 from timm.models.layers import DropPath
 
@@ -411,7 +412,8 @@ def create_timm_vit(config):
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         drop_path_rate=model_config.get('drop_path_rate', 0.0),        
-        init_values=model_config.get('layer_scale_init_value', 0.0)
+        init_values=model_config.get('layer_scale_init_value', 0.0),
+        norm_layer=partial(nn.LayerNorm, eps=1e-6)
     )
     
     return model
