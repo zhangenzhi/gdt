@@ -25,7 +25,7 @@ training:
   weight_decay: 0.3
   label_smoothing: 0.1
   warmup_epochs: 20
-  eta_min: 0.000001
+  eta_min: 0.0001
 
   num_epochs: 300
   batch_size: 1024 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
