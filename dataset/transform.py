@@ -84,7 +84,7 @@ class ImagenetTransformArgs:
         self.input_size = 224
         self.color_jitter = 0.4
         self.aa = 'rand-m9-mstd0.5'
-        self.reprob = 0.0
+        self.reprob = 0.25
         self.remode = 'pixel'
         self.recount = 1
         
