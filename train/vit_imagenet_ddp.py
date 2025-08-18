@@ -8,6 +8,7 @@ import contextlib
 import torch
 from torch import nn
 from timm.data.mixup import Mixup
+from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
 import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
@@ -218,6 +219,7 @@ def vit_imagenet_train(args, config):
 
     criterion = nn.CrossEntropyLoss()
     
+    
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
             model.parameters(), 
@@ -342,8 +344,8 @@ def vit_imagenet_train_single(args, config):
         else:
             model = DDP(model)
 
-    criterion = nn.CrossEntropyLoss()
-
+    # criterion = nn.CrossEntropyLoss()
+    criterion = LabelSmoothingCrossEntropy(smoothing=config['training']['label_smoothing'])
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
         model.parameters(), 
