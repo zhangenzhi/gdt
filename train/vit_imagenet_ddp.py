@@ -344,8 +344,8 @@ def vit_imagenet_train_single(args, config):
         else:
             model = DDP(model)
 
-    # criterion = nn.CrossEntropyLoss()
-    criterion = LabelSmoothingCrossEntropy(smoothing=config['training']['label_smoothing'])
+    criterion = nn.CrossEntropyLoss()
+    # criterion = LabelSmoothingCrossEntropy(smoothing=config['training']['label_smoothing'])
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
         model.parameters(), 
