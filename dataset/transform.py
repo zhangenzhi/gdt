@@ -82,9 +82,10 @@ class ImagenetTransformArgs:
     def __init__(self, **kwargs):
         # 默认参数值，可以根据需要修改
         self.input_size = 224
-        self.color_jitter = 0.4
-        self.aa = 'rand-m9-mstd0.5-inc1'
-        self.reprob = 0.25
+        self.color_jitter = 0.0
+        # self.aa = 'rand-m9-mstd0.5-inc1'
+        self.aa = 'rand-m9-mstd0.5'
+        self.reprob = 0.0
         self.remode = 'pixel'
         self.recount = 1
         
