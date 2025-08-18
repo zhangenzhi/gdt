@@ -365,9 +365,9 @@ def vit_imagenet_train_single(args, config):
     
     if num_warmup_steps > 0:
         # 预热调度器：从一个很小的值线性增长到1
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.0625, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-5)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
