@@ -377,7 +377,7 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
     """ Vision Transformer with support for global average pooling
     """
     def __init__(self, global_pool=False, **kwargs):
-        super(VisionTransformer, self).__init__(**kwargs)
+        super(MAEVisionTransformer, self).__init__(**kwargs)
 
         self.global_pool = global_pool
         if self.global_pool:
