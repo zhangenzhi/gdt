@@ -459,7 +459,7 @@ def create_timm_vit(config):
     
         # 使用 timm.create_model 创建模型
     model = MAEVisionTransformer(
-        model_name,
+        # model_name,
         # pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
         img_size=model_config['img_size'],
