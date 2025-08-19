@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--output', type=str, default='./output', help='Base output directory for logs and models.')
     parser.add_argument('--savefile', type=str, default=None, help='Subdirectory name for this run. If not provided, uses task_name from config.')
     parser.add_argument('--data_dir', type=str, default='/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--local', type=bool, default=False, help='local model')
     
     # Execution flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists.')
@@ -41,7 +42,7 @@ def main():
     args.output = os.path.join(args.output, task_name)
     os.makedirs(os.path.join(args.output, args.savefile), exist_ok=True)
 
-    is_ddp_environment = 'SLURM_PROCID' in os.environ and not args.local
+    is_ddp_environment = 'SLURM_PROCID' 
 
     if task_name == 'gdt_vit':
         if is_ddp_environment:
