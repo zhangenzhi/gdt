@@ -388,7 +388,7 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             del self.norm  # remove the original norm
 
-    def forward_features(self, x):
+    def forward_features(self, x, attn_mask=None):
         B = x.shape[0]
         x = self.patch_embed(x)
 
