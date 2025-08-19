@@ -346,14 +346,15 @@ def vit_imagenet_train_single(args, config):
             model = DDP(model)
 
     criterion = nn.CrossEntropyLoss()
-    model_without_ddp = model.module
-    param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
-        no_weight_decay_list=model_without_ddp.no_weight_decay(),
-        layer_decay=0.75
-    )
+    # model_without_ddp = model.module
+    # param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
+    #     no_weight_decay_list=model_without_ddp.no_weight_decay(),
+    #     layer_decay=0.75
+    # )
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
-        param_groups, 
+        # param_groups,
+        model.parameters(),
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
         betas=tuple(config['training'].get('betas', (0.9, 0.95))),
