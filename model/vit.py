@@ -437,30 +437,10 @@ def create_timm_vit(config):
     
     print(f"正在基于 '{model_name}' 创建模型，并使用自定义参数进行覆盖。")
     
-    # # 使用 timm.create_model 创建模型
-    # model = timm.create_model(
-    #     model_name,
-    #     pretrained=model_config['pretrained'],
-    #     num_classes=model_config['num_classes'],
-    #     img_size=model_config['img_size'],
-    #     patch_size=model_config['patch_size'],
-    #     in_chans=model_config.get('in_channels', 3),
-    #     embed_dim=model_config['embed_dim'],
-    #     depth=model_config['depth'],
-    #     num_heads=model_config['num_heads'],
-    #     mlp_ratio=model_config.get('mlp_ratio', 4.0),
-    #     drop_path_rate=model_config.get('drop_path_rate', 0.0),
-    #     weight_init = 'jax_nlhb',
-    #     # qk_norm = True,
-    #     # init_values=model_config.get('layer_scale_init_value', 0.0),
-    #     init_values=1e-6,
-    #     norm_layer=partial(nn.LayerNorm, eps=1e-6)
-    # )
-    
-        # 使用 timm.create_model 创建模型
-    model = MAEVisionTransformer(
-        # model_name,
-        # pretrained=model_config['pretrained'],
+    # 使用 timm.create_model 创建模型
+    model = timm.create_model(
+        model_name,
+        pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
         img_size=model_config['img_size'],
         patch_size=model_config['patch_size'],
@@ -469,14 +449,34 @@ def create_timm_vit(config):
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        # drop_path_rate=model_config.get('drop_path_rate', 0.0),
-        drop_path_rate=0.1,
+        drop_path_rate=model_config.get('drop_path_rate', 0.0),
         weight_init = 'jax_nlhb',
         # qk_norm = True,
         # init_values=model_config.get('layer_scale_init_value', 0.0),
-        init_values=0.0,
+        init_values=1e-6,
         norm_layer=partial(nn.LayerNorm, eps=1e-6)
     )
+    
+    #     # 使用 timm.create_model 创建模型
+    # model = MAEVisionTransformer(
+    #     # model_name,
+    #     # pretrained=model_config['pretrained'],
+    #     num_classes=model_config['num_classes'],
+    #     img_size=model_config['img_size'],
+    #     patch_size=model_config['patch_size'],
+    #     in_chans=model_config.get('in_channels', 3),
+    #     embed_dim=model_config['embed_dim'],
+    #     depth=model_config['depth'],
+    #     num_heads=model_config['num_heads'],
+    #     mlp_ratio=model_config.get('mlp_ratio', 4.0),
+    #     # drop_path_rate=model_config.get('drop_path_rate', 0.0),
+    #     drop_path_rate=0.1,
+    #     weight_init = 'jax_nlhb',
+    #     # qk_norm = True,
+    #     # init_values=model_config.get('layer_scale_init_value', 0.0),
+    #     init_values=0.0,
+    #     norm_layer=partial(nn.LayerNorm, eps=1e-6)
+    # )
     
     
     return model
