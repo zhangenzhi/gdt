@@ -417,7 +417,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/vit_test.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm-aa-lrd', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
