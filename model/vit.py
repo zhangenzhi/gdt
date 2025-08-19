@@ -29,61 +29,61 @@ class PatchEmbedding(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
-# class VisionTransformer(nn.Module):
-#     """Standard Vision Transformer with a Transformer Encoder."""
-#     def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
-#         super().__init__()
-#         self.embed_dim = embed_dim
-#         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
-#         num_patches = self.patch_embed.num_patches
+class VisionTransformer(nn.Module):
+    """Standard Vision Transformer with a Transformer Encoder."""
+    def __init__(self, *, img_size=224, patch_size=16, in_channels=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, num_classes=1000, dropout=0.1):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
+        num_patches = (img_size // patch_size) ** 2
 
-#         # Special tokens
-#         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-#         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
-#         self.pos_drop = nn.Dropout(p=dropout)
+        # Special tokens
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_drop = nn.Dropout(p=dropout)
 
-#         # Transformer Encoder
-#         encoder_layer = nn.TransformerEncoderLayer(
-#             d_model=embed_dim, 
-#             nhead=num_heads, 
-#             dim_feedforward=int(embed_dim * mlp_ratio), 
-#             dropout=dropout, 
-#             batch_first=True
-#         )
-#         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim, 
+            nhead=num_heads, 
+            dim_feedforward=int(embed_dim * mlp_ratio), 
+            dropout=dropout, 
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
 
-#         # Classifier Head
-#         self.norm = nn.LayerNorm(embed_dim)
-#         self.head = nn.Linear(embed_dim, num_classes)
+        # Classifier Head
+        self.norm = nn.LayerNorm(embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes)
 
-#         self.apply(self._init_weights)
+        self.apply(self._init_weights)
 
-#     def _init_weights(self, m):
-#         if isinstance(m, nn.Linear):
-#             torch.nn.init.xavier_uniform_(m.weight)
-#             if m.bias is not None:
-#                 nn.init.constant_(m.bias, 0)
-#         elif isinstance(m, nn.LayerNorm):
-#             nn.init.constant_(m.bias, 0)
-#             nn.init.constant_(m.weight, 1.0)
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
 
-#     def forward(self, x):
-#         B = x.shape[0]
-#         x = self.patch_embed(x)
+    def forward(self, x):
+        B = x.shape[0]
+        x = self.patch_embed(x)
 
-#         cls_tokens = self.cls_token.expand(B, -1, -1)
-#         x = torch.cat((cls_tokens, x), dim=1)
-#         x = x + self.pos_embed
-#         x = self.pos_drop(x)
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
 
-#         x = self.transformer_encoder(x)
+        x = self.transformer_encoder(x)
         
-#         # Get the CLS token for classification
-#         cls_output = self.norm(x[:, 0])
-#         logits = self.head(cls_output)
+        # Get the CLS token for classification
+        cls_output = self.norm(x[:, 0])
+        logits = self.head(cls_output)
         
-#         # Return only logits to match standard classifier output
-#         return logits
+        # Return only logits to match standard classifier output
+        return logits
 
 # import transformer_engine.pytorch as te
 # from transformer_engine.common import recipe
@@ -430,8 +430,6 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
 def create_timm_vit(config):  
-    # 查找匹配的ViT模型名称，最常见的是 'vit_base_patch16_224'
-    # 'base' 通常意味着 depth=12, embed_dim=768, num_heads=12
     model_name = 'vit_base_patch16_224' 
     model_config = config['model']
     
@@ -456,28 +454,6 @@ def create_timm_vit(config):
         # init_values=1e-6,
         norm_layer=partial(nn.LayerNorm, eps=1e-6)
     )
-    
-    #     # 使用 timm.create_model 创建模型
-    # model = MAEVisionTransformer(
-    #     # model_name,
-    #     # pretrained=model_config['pretrained'],
-    #     num_classes=model_config['num_classes'],
-    #     img_size=model_config['img_size'],
-    #     patch_size=model_config['patch_size'],
-    #     in_chans=model_config.get('in_channels', 3),
-    #     embed_dim=model_config['embed_dim'],
-    #     depth=model_config['depth'],
-    #     num_heads=model_config['num_heads'],
-    #     mlp_ratio=model_config.get('mlp_ratio', 4.0),
-    #     # drop_path_rate=model_config.get('drop_path_rate', 0.0),
-    #     drop_path_rate=0.1,
-    #     weight_init = 'jax_nlhb',
-    #     # qk_norm = True,
-    #     # init_values=model_config.get('layer_scale_init_value', 0.0),
-    #     init_values=0.0,
-    #     norm_layer=partial(nn.LayerNorm, eps=1e-6)
-    # )
-    
     
     return model
 
