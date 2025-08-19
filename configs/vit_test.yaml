@@ -15,7 +15,7 @@ model:
   num_classes: 1000
   drop_path_rate: 0.1
   pretrained: False
-  layer_scale_init_value: 0.0 #1e-6
+  layer_scale_init_value: 0.0 
 
 # 2. Training Hyperparameters
 training:
@@ -28,7 +28,7 @@ training:
   eta_min: 0.000001
 
   num_epochs: 300
-  batch_size: 1024 # Adjust based on your DDP setup (e.g., 256 total / 8 nodes = 32 per node)
+  batch_size: 1024 # batch per node
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
