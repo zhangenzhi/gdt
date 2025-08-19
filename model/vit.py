@@ -453,7 +453,7 @@ def create_timm_vit(config):
         weight_init = 'jax_nlhb',
         # qk_norm = True,
         # init_values=model_config.get('layer_scale_init_value', 0.0),
-        init_values=1e-6,
+        # init_values=1e-6,
         norm_layer=partial(nn.LayerNorm, eps=1e-6)
     )
     
