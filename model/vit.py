@@ -184,24 +184,24 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         return outcome
     
-# def create_vit_model(config: Dict) -> VisionTransformer:
-#     """
-#     Factory function to create a VisionTransformer from a config dictionary.
-#     """
-#     model_config = config['model']
-#     model = VisionTransformer(
-#         img_size=model_config['img_size'],
-#         patch_size=model_config['patch_size'],
-#         in_channels=model_config.get('in_channels', 3),
-#         embed_dim=model_config['embed_dim'],
-#         depth=model_config['depth'],
-#         num_heads=model_config['num_heads'],
-#         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-#         num_classes=model_config['num_classes'],
-#         # droppath=model_config.get('droppath', 0.0)        
-#         # layer_scale_init_value=float(model_config['layer_scale_init_value'])
-#     )
-#     return model
+def create_vit_model(config: Dict) -> VisionTransformer:
+    """
+    Factory function to create a VisionTransformer from a config dictionary.
+    """
+    model_config = config['model']
+    model = VisionTransformer(
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_channels=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        num_classes=model_config['num_classes'],
+        # droppath=model_config.get('droppath', 0.0)        
+        # layer_scale_init_value=float(model_config['layer_scale_init_value'])
+    )
+    return model
 
 
 def create_timm_vit(config):  
@@ -232,93 +232,3 @@ def create_timm_vit(config):
     
     return model
 
-# def create_vit_te_model(config: Dict) -> VisionTransformerTE:
-#     """
-#     Factory function to create a VisionTransformerTE from a config dictionary.
-#     """
-#     model_config = config['model']
-#     model = VisionTransformerTE(
-#         img_size=model_config['img_size'],
-#         patch_size=model_config['patch_size'],
-#         in_channels=model_config.get('in_channels', 3),
-#         embed_dim=model_config['embed_dim'],
-#         depth=model_config['depth'],
-#         num_heads=model_config['num_heads'],
-#         mlp_ratio=model_config.get('mlp_ratio', 4.0),
-#         num_classes=model_config['num_classes'],
-#         dropout=model_config.get('dropout', 0.1)
-#     )
-#     return model
-
-# # Example of how to instantiate and test the model, including backward pass
-# # batch size, num_class all need to be 8/16 times.
-
-# if __name__ == '__main__':
-#     # Ensure CUDA is available
-#     if torch.cuda.is_available() and hasattr(torch.cuda, 'is_bf16_supported') and torch.cuda.is_bf16_supported():
-#         device = torch.device("cuda")
-#         batch_size = 16 # Example batch size
-#         num_classes = 1000
-        
-#         # Define a model configuration
-#         vit_b_16_config = {
-#             'model': {
-#                 'img_size': 224,
-#                 'patch_size': 16,
-#                 'embed_dim': 768,
-#                 'depth': 12,
-#                 'num_heads': 12,
-#                 'num_classes': num_classes,
-#                 'dropout': 0.1
-#             }
-#         }
-
-#         # Instantiate the Transformer Engine ViT model using the factory
-#         model = create_vit_te_model(vit_b_16_config).to(device)
-#         # For a real training scenario, you would also wrap the model with DDP
-#         # and torch.compile, e.g.:
-#         # model = torch.nn.parallel.DistributedDataParallel(model)
-#         # model = torch.compile(model)
-
-#         print("Model Instantiated on CUDA with Transformer Engine layers via factory.")
-
-#         # --- Verification Step ---
-#         print("\n--- Running Verification: Forward and Backward Pass ---")
-#         try:
-#             # 1. Create dummy input and labels
-#             dummy_input = torch.randn(batch_size, 3, 224, 224).to(device)
-#             dummy_labels = torch.randint(0, num_classes, (batch_size,), device=device)
-#             loss_fn = nn.CrossEntropyLoss()
-
-#             # 2. Perform a forward pass
-#             # The fp8_autocast is handled inside the model's forward method
-#             output = model(dummy_input)
-#             print(f"Forward pass successful!")
-#             print(f"Output shape: {output.shape}") # Expected: [2, 1000]
-#             print(f"Output dtype: {output.dtype}") # Expected: torch.float32
-
-#             # 3. Calculate loss
-#             # Note: The backward pass must be outside the fp8_autocast context
-#             loss = loss_fn(output, dummy_labels)
-#             print(f"Loss calculated: {loss.item():.4f}")
-
-#             # 4. Perform a backward pass
-#             loss.backward()
-#             print("Backward pass successful!")
-
-#             # 5. Verify gradients
-#             # Check if the gradient of the final linear layer's weight exists
-#             if model.head.weight.grad is not None:
-#                 print("Gradient check PASSED. Gradients were computed for the head layer.")
-#             else:
-#                 print("Gradient check FAILED. No gradients found for the head layer.")
-            
-#             print("\nEnvironment and model code verified for a full training step. ✅")
-
-#         except Exception as e:
-#             print(f"\nAn error occurred during verification: {e}")
-#             import traceback
-#             traceback.print_exc()
-
-#     else:
-#         print("CUDA with Hopper architecture (FP8/BF16 support) not available. This model requires an H100 GPU.")
