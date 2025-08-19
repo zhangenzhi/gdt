@@ -248,7 +248,7 @@ def vit_imagenet_train(args, config):
         # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-5)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
@@ -319,15 +319,15 @@ def vit_imagenet_train_single(args, config):
             model = DDP(model)
 
     criterion = nn.CrossEntropyLoss()
-    # model_without_ddp = model.module
-    # param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
-    #     no_weight_decay_list=model_without_ddp.no_weight_decay(),
-    #     layer_decay=0.75
-    # )
+    model_without_ddp = model.module
+    param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
+        no_weight_decay_list=model_without_ddp.no_weight_decay(),
+        layer_decay=0.75
+    )
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
-        # param_groups,
-        model.parameters(),
+        param_groups,
+        # model.parameters(),
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
         betas=tuple(config['training'].get('betas', (0.9, 0.95))),
@@ -349,7 +349,7 @@ def vit_imagenet_train_single(args, config):
         # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-5)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
