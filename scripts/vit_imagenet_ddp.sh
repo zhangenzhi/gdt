@@ -3,7 +3,7 @@
 #SBATCH -o gdt_imagenet_vit_ddp.o%J
 #SBATCH -t 02:00:00
 #SBATCH -q debug
-#SBATCH -N 8
+#SBATCH -N 2
 #SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
 #SBATCH --mail-type=END
@@ -32,9 +32,9 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 8 -n 64 --ntasks-per-node 8 python ./main.py \
+srun -N 2 -n 16 --ntasks-per-node 8 python ./main.py \
     --config ./configs/vit_imagenet_ddp.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --savefile vit-n8-bz256-he \
+    --savefile vit-l-n2-bz4k-he-timm-aa \
     --num_workers 32 \
     --reload

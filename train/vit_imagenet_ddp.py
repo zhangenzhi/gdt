@@ -219,11 +219,15 @@ def vit_imagenet_train(args, config):
     model = DDP(model, device_ids=[device_id])
 
     criterion = nn.CrossEntropyLoss()
-    
+    model_without_ddp = model.module
+    param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
+        no_weight_decay_list=model_without_ddp.no_weight_decay(),
+        layer_decay=0.75
+    )
     
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
-            model.parameters(), 
+            param_groups, 
             lr=config['training']['learning_rate'], 
             weight_decay=config['training']['weight_decay'],
             betas=tuple(config['training'].get('betas', (0.9, 0.95))),
@@ -242,9 +246,9 @@ def vit_imagenet_train(args, config):
     
     if num_warmup_steps > 0:
         # 预热调度器：从一个很小的值线性增长到1
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
-        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-4)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-5)
         # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
@@ -278,37 +282,6 @@ def vit_imagenet_train(args, config):
             
     train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
     dist.destroy_process_group()
-
-def vit_imagenet_train_local(args, config):
-    """Main function for local (non-DDP) baseline ViT training."""
-    setup_logging(args)
-    
-    device_id = 0
-    if torch.cuda.is_available():
-        torch.cuda.set_device(device_id)
-        logging.info(f"Starting local training on device cuda:{device_id}")
-    else:
-        device_id = "cpu"
-        logging.info(f"Starting local training on device {device_id}")
-
-    args.img_size = config['model']['img_size']
-    args.batch_size = config['training']['batch_size']
-    dataloaders, _ = imagenet_subloaders(subset_data_dir=args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers)
-
-    model = create_vit_model(config)
-
-    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
-    if args.reload and os.path.exists(checkpoint_path):
-        logging.info(f"Reloading model from {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device(device_id)))
-
-    model.to(device_id)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'], amsgrad=True)
-    scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'], eta_min=config['training']['min_lr'])
-
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, is_ddp=False)
 
 def vit_imagenet_train_single(args, config):
     # torchrun 会自动设置 'LOCAL_RANK' 等环境变量
