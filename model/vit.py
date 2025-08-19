@@ -3,6 +3,8 @@ from torch import nn
 from typing import List, Dict
 from functools import partial
 from torch.utils.checkpoint import checkpoint
+
+import timm
 from timm.models.layers import DropPath
 
 class PatchEmbedding(nn.Module):
@@ -425,7 +427,7 @@ def create_vit_model(config: Dict) -> VisionTransformer:
     )
     return model
 
-import timm
+
 def create_timm_vit(config):  
     # 查找匹配的ViT模型名称，最常见的是 'vit_base_patch16_224'
     # 'base' 通常意味着 depth=12, embed_dim=768, num_heads=12
