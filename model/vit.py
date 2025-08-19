@@ -371,7 +371,7 @@ class RelativeTransformerBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
-class TimmVisionTransformer(timm.models.vision_transformer.VisionTransformer):
+class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
     """ Vision Transformer with support for global average pooling
     """
     def __init__(self, global_pool=False, **kwargs):
@@ -455,7 +455,7 @@ def create_timm_vit(config):
     # )
     
         # 使用 timm.create_model 创建模型
-    model = TimmVisionTransformer(
+    model = MAEVisionTransformer(
         model_name,
         pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
