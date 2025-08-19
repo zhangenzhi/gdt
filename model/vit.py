@@ -370,7 +370,42 @@ class RelativeTransformerBlock(nn.Module):
         x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
-     
+
+class TimmVisionTransformer(timm.models.vision_transformer.VisionTransformer):
+    """ Vision Transformer with support for global average pooling
+    """
+    def __init__(self, global_pool=False, **kwargs):
+        super(VisionTransformer, self).__init__(**kwargs)
+
+        self.global_pool = global_pool
+        if self.global_pool:
+            norm_layer = kwargs['norm_layer']
+            embed_dim = kwargs['embed_dim']
+            self.fc_norm = norm_layer(embed_dim)
+
+            del self.norm  # remove the original norm
+
+    def forward_features(self, x):
+        B = x.shape[0]
+        x = self.patch_embed(x)
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        x = torch.cat((cls_tokens, x), dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
+
+        for blk in self.blocks:
+            x = blk(x)
+
+        if self.global_pool:
+            x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
+            outcome = self.fc_norm(x)
+        else:
+            x = self.norm(x)
+            outcome = x[:, 0]
+
+        return outcome
+    
 def create_vit_model(config: Dict) -> VisionTransformer:
     """
     Factory function to create a VisionTransformer from a config dictionary.
@@ -399,8 +434,28 @@ def create_timm_vit(config):
     
     print(f"正在基于 '{model_name}' 创建模型，并使用自定义参数进行覆盖。")
     
-    # 使用 timm.create_model 创建模型
-    model = timm.create_model(
+    # # 使用 timm.create_model 创建模型
+    # model = timm.create_model(
+    #     model_name,
+    #     pretrained=model_config['pretrained'],
+    #     num_classes=model_config['num_classes'],
+    #     img_size=model_config['img_size'],
+    #     patch_size=model_config['patch_size'],
+    #     in_chans=model_config.get('in_channels', 3),
+    #     embed_dim=model_config['embed_dim'],
+    #     depth=model_config['depth'],
+    #     num_heads=model_config['num_heads'],
+    #     mlp_ratio=model_config.get('mlp_ratio', 4.0),
+    #     drop_path_rate=model_config.get('drop_path_rate', 0.0),
+    #     weight_init = 'jax_nlhb',
+    #     # qk_norm = True,
+    #     # init_values=model_config.get('layer_scale_init_value', 0.0),
+    #     init_values=1e-6,
+    #     norm_layer=partial(nn.LayerNorm, eps=1e-6)
+    # )
+    
+        # 使用 timm.create_model 创建模型
+    model = TimmVisionTransformer(
         model_name,
         pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
@@ -419,6 +474,7 @@ def create_timm_vit(config):
         init_values=0.0,
         norm_layer=partial(nn.LayerNorm, eps=1e-6)
     )
+    
     
     return model
 

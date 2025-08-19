@@ -8,16 +8,6 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 
 def build_dataset(is_train, args):
-    """
-    Builds the ImageNet dataset with a specific transformation pipeline.
-
-    Args:
-        is_train (bool): If True, returns the training dataset. Otherwise, returns the validation dataset.
-        args (Namespace): An object containing various arguments like data_path, input_size, etc.
-
-    Returns:
-        torchvision.datasets.ImageFolder: The dataset object.
-    """
     transform = build_transform(is_train, args)
 
     root = os.path.join(args.data_path, 'train' if is_train else 'val')
@@ -29,18 +19,6 @@ def build_dataset(is_train, args):
 
 
 def build_transform(is_train, args):
-    """
-    Builds the image transformation pipeline using timm's create_transform.
-
-    Args:
-        is_train (bool): If True, builds a training transformation pipeline with data augmentation.
-                         Otherwise, builds a validation transformation pipeline.
-        args (Namespace): An object containing various arguments like input_size,
-                          auto_augment (aa), random erasing (re_prob), etc.
-
-    Returns:
-        transforms.Compose: The composed transformation pipeline.
-    """
     mean = IMAGENET_DEFAULT_MEAN
     std = IMAGENET_DEFAULT_STD
     
@@ -85,7 +63,7 @@ class ImagenetTransformArgs:
         self.color_jitter = 0.0
         # self.aa = 'rand-m9-mstd0.5-inc1'
         self.aa = 'rand-m9-mstd0.5'
-        self.reprob = 0.0
+        self.reprob = 0.25
         self.remode = 'pixel'
         self.recount = 1
         
