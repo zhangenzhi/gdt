@@ -409,24 +409,24 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         return outcome
     
-def create_vit_model(config: Dict) -> VisionTransformer:
-    """
-    Factory function to create a VisionTransformer from a config dictionary.
-    """
-    model_config = config['model']
-    model = VisionTransformer(
-        img_size=model_config['img_size'],
-        patch_size=model_config['patch_size'],
-        in_channels=model_config.get('in_channels', 3),
-        embed_dim=model_config['embed_dim'],
-        depth=model_config['depth'],
-        num_heads=model_config['num_heads'],
-        mlp_ratio=model_config.get('mlp_ratio', 4.0),
-        num_classes=model_config['num_classes'],
-        # droppath=model_config.get('droppath', 0.0)        
-        # layer_scale_init_value=float(model_config['layer_scale_init_value'])
-    )
-    return model
+# def create_vit_model(config: Dict) -> VisionTransformer:
+#     """
+#     Factory function to create a VisionTransformer from a config dictionary.
+#     """
+#     model_config = config['model']
+#     model = VisionTransformer(
+#         img_size=model_config['img_size'],
+#         patch_size=model_config['patch_size'],
+#         in_channels=model_config.get('in_channels', 3),
+#         embed_dim=model_config['embed_dim'],
+#         depth=model_config['depth'],
+#         num_heads=model_config['num_heads'],
+#         mlp_ratio=model_config.get('mlp_ratio', 4.0),
+#         num_classes=model_config['num_classes'],
+#         # droppath=model_config.get('droppath', 0.0)        
+#         # layer_scale_init_value=float(model_config['layer_scale_init_value'])
+#     )
+#     return model
 
 
 def create_timm_vit(config):  
