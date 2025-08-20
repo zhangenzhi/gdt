@@ -288,7 +288,7 @@ class MAE(nn.Module):
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MAE().to(device)
-    dummy = torch.randn(1024, 3, 224, 224).to(device)
+    dummy = torch.randn(512, 3, 224, 224).to(device)
     
     # The forward pass now returns loss, reconstruction, and mask
     loss, recon, mask = model(dummy)
