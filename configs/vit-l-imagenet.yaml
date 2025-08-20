@@ -1,7 +1,7 @@
 # Configuration for the Baseline Vision Transformer (ViT) Model
 
 # A name for this specific experiment run, used for creating output directories
-task_name: "vit_imagenet_local_test"
+task_name: "vit_imagenet_ddp"
 
 # 1. Model Architecture Configuration
 model:
