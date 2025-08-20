@@ -159,7 +159,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     images = images.to(device_id, non_blocking=True)
                     # MAE model's forward pass returns the loss directly
-                    loss, recon_patches_flat, mask, _ = model(images)
+                    loss, recon_patches_flat, mask = model(images)
                     loss = loss / accumulation_steps
                 
                 scaler.scale(loss).backward()
@@ -176,7 +176,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
             if (i + 1) % 1000 == 0 and is_main_process:
                 with torch.no_grad():
                     # MAE model returns un-normalized patches
-                    loss_val, recon, mask_val, target_patches_pixel = model(images)
+                    loss_val, recon, mask_val = model(images)
                     visualize_and_save(
                         images[0], 
                         mask_val[0], 
@@ -248,7 +248,7 @@ def evaluate_mae_model(model, val_loader, device, args, is_ddp=False, epoch=0):
         with autocast(device_type='cuda', dtype=torch.bfloat16):
             for i, (images, _) in enumerate(val_loader):
                 images = images.to(device, non_blocking=True)
-                loss, recon, mask, _ = model(images)
+                loss, recon, mask = model(images)
                 total_loss += loss.item() * images.size(0)
                 total_samples += images.size(0)
                 
