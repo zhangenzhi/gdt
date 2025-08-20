@@ -48,14 +48,90 @@ def setup_ddp(rank, world_size):
 
 
 # --------------------------------------------- #
+#   图像可视化和保存函数 (Image Visualization and Saving)
+# --------------------------------------------- #
+def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
+    """
+    Saves the original, masked, and reconstructed images with loss and step in the title.
+    
+    Args:
+        original_img (Tensor): [C, H, W]
+        mask (Tensor): [N]
+        recon_patches (Tensor): [N, C*P*P]
+        patch_size (int)
+        loss (float)
+        step (int)
+        output_dir (str)
+        prefix (str)
+    """
+    # Detach tensors and move to CPU
+    original_img = original_img.cpu().permute(1, 2, 0).numpy() * 255
+    H, W, C = original_img.shape
+    N = mask.shape[0]
+    
+    # Un-normalize and reshape reconstructed patches
+    recon_patches = recon_patches.cpu().numpy()
+    
+    # Create the masked image
+    masked_img = original_img.copy()
+    num_patches_w = W // patch_size
+    num_patches_h = H // patch_size
+    
+    for i in range(N):
+        if not mask[i]:  # If it's a masked patch
+            h_idx = i // num_patches_w
+            w_idx = i % num_patches_w
+            start_h, start_w = h_idx * patch_size, w_idx * patch_size
+            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 127 # Grey color
+            
+    # Create the reconstructed image (fill in masked patches with reconstructed ones)
+    reconstructed_img = original_img.copy()
+    # The reconstruction head outputs 3*P*P. We assume C=3.
+    recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size).transpose(0, 2, 3, 1) # N, P, P, C
+    
+    for i in range(N):
+        if not mask[i]:  # If it's a masked patch
+            h_idx = i // num_patches_w
+            w_idx = i % num_patches_w
+            start_h, start_w = h_idx * patch_size, w_idx * patch_size
+            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i] * 255
+            
+    # Convert to PIL Images
+    original_pil = Image.fromarray(original_img.astype(np.uint8))
+    masked_pil = Image.fromarray(masked_img.astype(np.uint8))
+    reconstructed_pil = Image.fromarray(reconstructed_img.astype(np.uint8))
+
+    # Add titles and save
+    draw = ImageDraw.Draw(original_pil)
+    title_text = f"Loss: {loss:.4f} | Step: {step}"
+    
+    # Try to find a font, or use default
+    try:
+        font = ImageFont.truetype("Arial.ttf", 24)
+    except IOError:
+        font = ImageFont.load_default()
+    
+    draw.text((10, 10), "Original", (255, 255, 255), font=font)
+    draw.text((10, 40), title_text, (255, 255, 255), font=font)
+    masked_draw = ImageDraw.Draw(masked_pil)
+    masked_draw.text((10, 10), "Masked Input", (255, 255, 255), font=font)
+    masked_draw.text((10, 40), title_text, (255, 255, 255), font=font)
+    reconstructed_draw = ImageDraw.Draw(reconstructed_pil)
+    reconstructed_draw.text((10, 10), "Reconstructed", (255, 255, 255), font=font)
+    reconstructed_draw.text((10, 40), title_text, (255, 255, 255), font=font)
+
+    os.makedirs(output_dir, exist_ok=True)
+    original_pil.save(os.path.join(output_dir, f"{prefix}_{step}_original.png"))
+    masked_pil.save(os.path.join(output_dir, f"{prefix}_{step}_masked.png"))
+    reconstructed_pil.save(os.path.join(output_dir, f"{prefix}_{step}_recon.png"))
+
+
+# --------------------------------------------- #
 #   MAE 预训练核心逻辑 (MAE Pre-training Core Logic)
 # --------------------------------------------- #
 def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device_id, args, start_epoch, is_ddp=False):
     """
     MAE pre-training loop.
-    
-    This function has been modified to handle the MAE's reconstruction loss,
-    which is returned directly from the model's forward pass.
     """
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
@@ -76,7 +152,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
         
         running_loss = 0.0
         
-        for i, (images, _) in enumerate(train_loader): # MAE is unsupervised, so labels are not used.
+        for i, (images, _) in enumerate(train_loader):
             images = images.to(device_id, non_blocking=True)
             
             sync_context = model.no_sync() if (is_ddp and (i + 1) % accumulation_steps != 0) else contextlib.nullcontext()
@@ -84,7 +160,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     # MAE model's forward pass returns the loss directly
-                    loss, _, _ = model(images)
+                    loss, recon_patches_flat, mask, _ = model(images)
                     loss = loss / accumulation_steps
                 
                 scaler.scale(loss).backward()
@@ -94,8 +170,24 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
                 if scheduler and not config['training']['use_postrain']: scheduler.step()
-                
+            
             running_loss += loss.item() * accumulation_steps
+            
+            # Save images every 1000 steps on the main process
+            if (i + 1) % 1000 == 0 and is_main_process:
+                with torch.no_grad():
+                    # MAE model returns un-normalized patches
+                    loss_val, recon, mask_val, target_patches_pixel = model(images)
+                    visualize_and_save(
+                        images[0], 
+                        mask_val[0], 
+                        recon[0], 
+                        args.patch_size, 
+                        loss_val.item(), 
+                        i + 1,
+                        os.path.join(args.output, args.savefile, "images"),
+                        prefix=f"train_e{epoch + 1}"
+                    )
 
             if (i + 1) % 10 == 0 and is_main_process:
                 avg_loss = running_loss / 10
@@ -108,7 +200,9 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
             model,
             val_loader,
             device_id,
-            is_ddp=is_ddp
+            args,
+            is_ddp=is_ddp,
+            epoch=epoch
         )
                 
         if is_main_process:
@@ -142,20 +236,35 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
         logging.info(f'Finished Pre-training. Best Validation Loss: {best_val_loss:.5f}')
 
 
-def evaluate_mae_model(model, val_loader, device, is_ddp=False):
+def evaluate_mae_model(model, val_loader, device, args, is_ddp=False, epoch=0):
     """
     Evaluation function for MAE pre-training.
     Returns the average reconstruction loss on the validation set.
     """
     model.eval()
     total_loss, total_samples = 0, 0
+    is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
+    
     with torch.no_grad():
         with autocast(device_type='cuda', dtype=torch.bfloat16):
-            for images, _ in val_loader:
+            for i, (images, _) in enumerate(val_loader):
                 images = images.to(device, non_blocking=True)
-                loss, _, _ = model(images)
+                loss, recon, mask, _ = model(images)
                 total_loss += loss.item() * images.size(0)
                 total_samples += images.size(0)
+                
+                # Save images on the main process for the first 10 validation batches
+                if i < 10 and is_main_process:
+                     visualize_and_save(
+                        images[0], 
+                        mask[0], 
+                        recon[0], 
+                        args.patch_size, 
+                        loss.item(), 
+                        i,
+                        os.path.join(args.output, args.savefile, "images"),
+                        prefix=f"val_e{epoch + 1}"
+                    )
 
     if is_ddp:
         total_loss_tensor = torch.tensor(total_loss, device=device)
@@ -181,6 +290,7 @@ def mae_imagenet_pretrain_single(args, config):
 
     args.img_size = config['model']['img_size']
     args.batch_size = config['training']['batch_size']
+    args.patch_size = config['model']['patch_size'] # Get patch size for visualization
     
     dataloaders = imagenet_distribute(
         img_size=args.img_size,
@@ -190,8 +300,8 @@ def mae_imagenet_pretrain_single(args, config):
 
     # 实例化 MAE 模型
     model = MAE(
-        img_size=config['model']['img_size'],
-        patch_size=config['model']['patch_size'],
+        img_size=args.img_size,
+        patch_size=args.patch_size,
         encoder_embed_dim=config['model']['encoder_embed_dim'],
         encoder_depth=config['model']['encoder_depth'],
         encoder_heads=config['model']['encoder_heads'],
@@ -211,12 +321,8 @@ def mae_imagenet_pretrain_single(args, config):
         else:
             model = DDP(model)
 
-    # MAE's loss is calculated internally, so we don't need a separate criterion
-    # The loss is returned directly from model's forward method.
-
     model_without_ddp = model.module
     
-    # 采用标准的 AdamW 优化器，MAE 通常不需要复杂的 LRD
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
         model_without_ddp.parameters(),
