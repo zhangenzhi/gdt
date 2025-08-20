@@ -322,7 +322,7 @@ def vit_imagenet_train_single(args, config):
     model_without_ddp = model.module
     param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
         no_weight_decay_list=model_without_ddp.no_weight_decay(),
-        layer_decay=0.75
+        layer_decay=0.65
     )
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
@@ -347,7 +347,7 @@ def vit_imagenet_train_single(args, config):
     
     if num_warmup_steps > 0:
         # 预热调度器：从一个很小的值线性增长到1
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.06, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
         main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
         # 使用SequentialLR将两者串联起来
@@ -388,7 +388,7 @@ def vit_imagenet_train_single(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT Training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/vit-b16_imagenet.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm', help='Subdirectory for saving logs and models')
