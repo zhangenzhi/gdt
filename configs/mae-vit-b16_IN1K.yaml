@@ -33,7 +33,7 @@ training:
   num_epochs: 300
   batch_size: 256
 
-  use_compile: true
-  use_fused_optimizer: true
+  use_compile: false
+  use_fused_optimizer: false
   use_postrain: false
   gradient_accumulation_steps: 1
