@@ -42,7 +42,7 @@ def setup_logging(args):
         ]
     )
 
-def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False):
+def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, config, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False):
     # 1. 初始化 GradScaler
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
@@ -280,7 +280,7 @@ def vit_imagenet_train(args, config):
         if dist.get_rank() == 0:
             logging.info(f"成功恢复，将从 Epoch {start_epoch + 1} 开始。")
             
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
 def vit_imagenet_train_single(args, config):
@@ -381,7 +381,7 @@ def vit_imagenet_train_single(args, config):
         if dist.get_rank() == 0:
             logging.info(f"成功恢复，将从 Epoch {start_epoch + 1} 开始。")
             
-    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config['training']['num_epochs'], device, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
+    train_vit_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=(world_size > 1))
     dist.destroy_process_group()
 
 
