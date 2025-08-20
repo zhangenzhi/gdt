@@ -151,12 +151,13 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
         running_loss = 0.0
         
         for i, (images, _) in enumerate(train_loader):
-            images = images.to(device_id, non_blocking=True)
+            # images = images.to(device_id, non_blocking=True)
             
             sync_context = model.no_sync() if (is_ddp and (i + 1) % accumulation_steps != 0) else contextlib.nullcontext()
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
+                    images = images.to(device_id, non_blocking=True)
                     # MAE model's forward pass returns the loss directly
                     loss, recon_patches_flat, mask, _ = model(images)
                     loss = loss / accumulation_steps
