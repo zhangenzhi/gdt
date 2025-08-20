@@ -15,10 +15,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
 from model.mae import MAE
 
-# --------------------------------------------- #
-#   加载数据集和日志功能 (from original code)
-# --------------------------------------------- #
-# Import the baseline ViT model and the dataset functions
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute
 from dataset.utlis import param_groups_lrd # Still useful for LRD
