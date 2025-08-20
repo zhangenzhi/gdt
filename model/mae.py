@@ -179,16 +179,13 @@ class MAEDecoder(nn.Module):
         flat_unpadded_tokens = torch.cat(unpadded_tokens_list, dim=0)
         
         # 3. Create the full sequence tensor with mask tokens
-        # We explicitly cast the mask_token to match the dtype of enc_out
-        full_sequence = self.mask_token.to(enc_out.dtype).repeat(B, N, 1)
+        full_sequence = self.mask_token.to(visible_tokens.dtype).repeat(B, N, 1)
 
-        # 4. Use advanced boolean indexing to scatter the unpadded tokens
-        # This is a vectorized operation, replacing the for loop
-        full_sequence[mask] = flat_unpadded_tokens
-        
-        # 5. Add positional embedding to the full sequence
-        # We explicitly cast the pos_embed to match the dtype of enc_out
-        full_sequence = full_sequence + self.pos_embed.to(enc_out.dtype)
+        # 4. Scatter the unpadded tokens (保证 dtype 一致)
+        full_sequence[mask] = flat_unpadded_tokens.to(visible_tokens.dtype)
+
+        # 5. Add positional embedding
+        full_sequence = full_sequence + self.pos_embed.to(visible_tokens.dtype)
 
         # 6. Feed to the decoder transformer
         dec_out = self.decoder(full_sequence)
