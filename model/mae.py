@@ -278,9 +278,6 @@ class MAE(nn.Module):
         return loss, recon_patches_flat, mask
 
 
-# --------------------------------------------- #
-#   5️⃣  Quick sanity check
-# --------------------------------------------- #
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MAE().to(device)
@@ -297,11 +294,22 @@ if __name__ == "__main__":
     with autocast(device_type=device.type, dtype=torch.bfloat16):
         # The forward pass now returns loss, reconstruction, and mask
         loss, recon, mask = model(dummy)
+
+    # Add backward pass to verify gradients
+    loss.backward()
     
     print("Reconstructed patch shape:", recon.shape)
     print("Reconstructed patch dtype:", recon.dtype)
     print("Loss:", loss.item())
     
+    # Check if a gradient exists for a parameter in the encoder
+    # This is a good way to test if the backward pass worked.
+    first_encoder_param_grad = model.encoder.transformer.layers[0].self_attn.in_proj_weight.grad
+    if first_encoder_param_grad is not None:
+        print("Gradient for the first encoder layer's attention weight has been calculated.")
+    else:
+        print("No gradient was calculated for the first encoder layer's attention weight.")
+        
     P = model.patch_size
     expected_shape = torch.Size([dummy.size(0), model.num_patches, 3 * P * P])
     assert recon.shape == expected_shape, f"Shape mismatch! Got {recon.shape}, expected {expected_shape}"
