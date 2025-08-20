@@ -115,6 +115,8 @@ class MAEDecoder(nn.Module):
         unpadded_tokens_list = [visible_tokens[i, :mask.sum(dim=1)[i]] for i in range(B)]
         flat_unpadded_tokens = torch.cat(unpadded_tokens_list, dim=0)
         
+        import pdb; pdb.set_trace()
+        
         # FIX: Cast the mask_token to the same dtype as the encoder output
         full_sequence = self.mask_token.to(enc_out.dtype).repeat(B, N, 1)
         
