@@ -13,9 +13,9 @@ from torch.amp import GradScaler, autocast
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
-from model.mae import MAE
 
 sys.path.append("./")
+from model.mae import MAE
 from dataset.imagenet import imagenet_distribute
 from dataset.utlis import param_groups_lrd # Still useful for LRD
 
