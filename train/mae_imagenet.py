@@ -367,7 +367,7 @@ def mae_imagenet_pretrain_single(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAE Pre-training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/mae_pretrain.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/mae-vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='mae_pretrain', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae_vit-b16', help='Subdirectory for saving logs and models')

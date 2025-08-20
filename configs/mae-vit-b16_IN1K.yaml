@@ -1,37 +1,39 @@
-# Configuration for the Baseline Vision Transformer (ViT) Model
-
 # A name for this specific experiment run, used for creating output directories
-task_name: "vit_imagenet_local_test"
+task_name: "mae_imagenet_pretrain"
 
 # 1. Model Architecture Configuration
 model:
   img_size: 224
   patch_size: 16
   in_channels: 3
-  embed_dim: 768
-  depth: 12
-  num_heads: 12
-  mlp_ratio: 4.0
-  num_classes: 1000
-  drop_path_rate: 0.1
-  pretrained: False
-  layer_scale_init_value: 0.0 
+
+  # Encoder Configuration (from ViT model)
+  encoder_embed_dim: 768
+  encoder_depth: 12
+  encoder_heads: 12
+  
+  # Decoder Configuration (MAE-specific)
+  decoder_embed_dim: 512
+  decoder_depth: 8
+  decoder_heads: 16
+  
+  # Masking Configuration (MAE-specific)
+  mask_ratio: 0.75
 
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.0016 # (1e-4 base_lr*bz/256)
+  learning_rate: 0.0001
   betas: [0.9, 0.95]
-  weight_decay: 0.3
-  label_smoothing: 0.1
+  weight_decay: 0.05 # MAE paper recommends 0.05
+  
   warmup_epochs: 20
   eta_min: 0.000001
-
+  
   num_epochs: 300
-  batch_size: 1024 # batch per node
+  batch_size: 256
 
-  use_compile: true                # 推荐：开启模型编译
-  use_fused_optimizer: true        # 推荐：开启融合优化器
-  use_mixup: true
-  use_postrain: False
+  use_compile: true
+  use_fused_optimizer: true
+  use_postrain: false
   gradient_accumulation_steps: 1
