@@ -13,6 +13,8 @@ from torch.amp import GradScaler, autocast
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
+from PIL import Image, ImageDraw, ImageFont
+import numpy as np
 
 sys.path.append("./")
 from model.mae import MAE
@@ -362,7 +364,6 @@ def mae_imagenet_pretrain_single(args, config):
             
     pretrain_mae_model(model, dataloaders['train'], dataloaders['val'], optimizer, scheduler, config['training']['num_epochs'], device, args, start_epoch=start_epoch, is_ddp=(world_size > 1))
     dist.destroy_process_group()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAE Pre-training Script")
