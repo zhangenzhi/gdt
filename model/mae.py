@@ -3,6 +3,10 @@
 # --------------------------------------------- #
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+# A utility for padding variable-length sequences
+from torch.nn.utils.rnn import pad_sequence
 
 # --------------------------------------------- #
 #   1️⃣  Patch embedding (unchanged)
@@ -22,7 +26,7 @@ class PatchEmbedding(nn.Module):
 
 
 # --------------------------------------------- #
-#   2️⃣  Encoder (高效版本)
+#   2️⃣  Encoder (高效版本 - 已修复)
 # --------------------------------------------- #
 class MAEEncoder(nn.Module):
     """Encoder that processes only visible patches. (Efficient Version)"""
@@ -74,7 +78,7 @@ class MAEEncoder(nn.Module):
         -------
         enc_out   : [B, num_visible, D]
         """
-        B, C, H, W = x.shape
+        B, _, _, _ = x.shape
         
         # 1. Perform patch embedding on the whole batch at once
         x = self.patch_embed(x) # [B, N, D]
@@ -83,47 +87,30 @@ class MAEEncoder(nn.Module):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        # 3. Gather only the visible patches using the boolean mask
-        # This is the key optimization. `mask.unsqueeze(-1).expand_as(x)` creates a
-        # boolean mask of shape [B, N, D] to select the elements from x.
-        # The result is flattened to [num_total_visible_patches, D].
-        visible_patches = x[mask]
+        # 3. Gather only the visible patches using the boolean mask, creating a list of tensors.
+        # This is more robust than a flattened tensor.
+        visible_patches_list = [x[i][mask[i]] for i in range(B)]
         
-        # Since the number of visible patches can vary per sample, we can't directly
-        # use a batch-wise transformer. A common approach is to pad, but a simpler
-        # and often effective way (though not strictly what the original MAE paper did)
-        # is to process them as one giant sequence if batch semantics aren't strictly
-        # required between patches of different images in the encoder.
-        # For a more faithful implementation, one would pad `visible_patches` here.
-        # However, for simplicity and to show the removal of the loop, we'll reshape.
+        # 4. Use pad_sequence to pad the list of tensors to the same size
+        # This is a highly efficient, vectorized operation.
+        padded_visible_patches = pad_sequence(visible_patches_list, batch_first=True)
         
-        # To maintain batch dimension for the transformer, we need to pad.
-        # Let's implement the padding logic efficiently.
-        num_visible = mask.sum(dim=1) # [B]
+        # 5. Create a padding mask for the transformer
+        num_visible = mask.sum(dim=1)
         max_vis = num_visible.max()
-        
-        # Create a padded tensor
-        padded_visible_patches = torch.zeros(B, max_vis, x.size(2), device=x.device, dtype=x.dtype)
-        
-        # Create a padding mask for the transformer
-        # (True means the position should be ignored)
         padding_mask = torch.arange(max_vis, device=x.device)[None, :] >= num_visible[:, None]
 
-        # Fill the padded tensor
-        current_pos = 0
-        for i, n_vis in enumerate(num_visible):
-            padded_visible_patches[i, :n_vis] = visible_patches[current_pos:current_pos + n_vis]
-            current_pos += n_vis
-
-        # 4. Feed to transformer with padding mask
+        # 6. Feed to transformer with padding mask
         enc_out = self.transformer(padded_visible_patches, src_key_padding_mask=padding_mask)
         enc_out = self.norm(enc_out)
 
-        return enc_out
+        # Return unpadded encoder output for the decoder
+        # The decoder will handle the padding internally
+        return enc_out, visible_patches_list
 
 
 # --------------------------------------------- #
-#   3️⃣  Decoder (高效版本)
+#   3️⃣  Decoder (高效版本 - 已修复)
 # --------------------------------------------- #
 class MAEDecoder(nn.Module):
     """Decoder that reconstructs all patches. (Efficient Version)"""
@@ -189,48 +176,33 @@ class MAEDecoder(nn.Module):
         # 1. Project encoder outputs to decoder dimension
         visible_tokens = self.decoder_embed(enc_out) # [B, num_visible, D_dec]
         
-        # 2. Create the full sequence tensor with mask tokens
-        # `~mask` gives us the masked positions
-        num_masked = (~mask).sum(dim=1)
+        # 2. Flatten the visible tokens to prepare for scatter
+        unpadded_tokens_list = [visible_tokens[i, :mask.sum(dim=1)[i]] for i in range(B)]
+        flat_unpadded_tokens = torch.cat(unpadded_tokens_list, dim=0)
         
-        # Create a full-size tensor to scatter into
-        x = self.mask_token.repeat(B, N, 1)
+        # 3. Create the full sequence tensor with mask tokens
+        # `mask_token` is repeated across the batch and sequence
+        full_sequence = self.mask_token.repeat(B, N, 1)
 
-        # 3. Use advanced indexing to scatter visible tokens into the correct positions
-        # This is the key optimization for the decoder.
-        # We need a batch-wise scatter. We can create an index map.
-        # `torch.where` is great for this.
-        visible_indices = torch.where(mask)
+        # 4. Use advanced boolean indexing to scatter the unpadded tokens
+        # This is a vectorized operation, replacing the for loop
+        full_sequence[mask] = flat_unpadded_tokens
         
-        # We need to align the flat `visible_tokens` with the 2D `visible_indices`
-        # A simple way is to use a mask for assignment.
-        # First, let's un-pad the encoder output
-        num_visible = mask.sum(dim=1)
-        unpadded_tokens = []
-        for i, n_vis in enumerate(num_visible):
-            unpadded_tokens.append(visible_tokens[i, :n_vis])
-        unpadded_tokens = torch.cat(unpadded_tokens, dim=0)
+        # 5. Add positional embedding to the full sequence
+        full_sequence = full_sequence + self.pos_embed
 
-        # Now scatter them back
-        x[mask] = unpadded_tokens
-
-        # 4. Add positional embedding to the full sequence
-        x = x + self.pos_embed
-
-        # 5. Feed to the decoder transformer
-        dec_out = self.decoder(x)
+        # 6. Feed to the decoder transformer
+        dec_out = self.decoder(full_sequence)
         dec_out = self.norm(dec_out)
 
-        # 6. Reconstruct pixel values only for masked patches (as per the paper)
-        # Or for all patches if you want to visualize everything.
-        # Here we reconstruct all for simplicity.
+        # 7. Reconstruct pixel values
         recon_flat = self.reconstruction_head(dec_out)
         
         return recon_flat
 
 
 # --------------------------------------------- #
-#   4️⃣  MAE wrapper (handles masking)
+#   4️⃣  MAE wrapper (handles masking - 已修复)
 # --------------------------------------------- #
 class MAE(nn.Module):
     """
@@ -291,34 +263,19 @@ class MAE(nn.Module):
         mask = self.random_masking(B, x.device) # [B, N]  True = visible
         
         # Encode only visible patches
-        enc_out = self.encoder(x, mask)
+        # NOTE: The encoder now returns padded output AND a list of unpadded tokens
+        enc_out, _ = self.encoder(x, mask)
         
         # Decode full sequence
         recon_patches_flat = self.decoder(enc_out, mask) # [B, N, P*P*3]
         
         # Calculate loss on masked patches
-        target_patches = self.encoder.patch_embed(x) # [B, N, D]
-        
-        # Normalize target pixels per-patch
-        # This is a key detail from the paper for stable training.
-        mean = target_patches.mean(dim=-1, keepdim=True)
-        var = target_patches.var(dim=-1, keepdim=True)
-        target_patches = (target_patches - mean) / (var + 1.e-6)**.5
-
-        # Project reconstruction to the same dimension as patch embeddings for loss calculation
-        # This is a common simplification. The original paper reconstructs pixels.
-        # Let's stick to the paper and reconstruct pixels.
-        
-        # Reshape target image into patches
+        # Using F.unfold is a cleaner way to extract patches
         P = self.patch_size
-        target_patches_pixel = x.unfold(2, P, P).unfold(3, P, P) # [B, C, N_h, N_w, P, P]
-        target_patches_pixel = target_patches_pixel.permute(0, 2, 3, 1, 4, 5).contiguous() # [B, N_h, N_w, C, P, P]
-        target_patches_pixel = target_patches_pixel.view(B, self.num_patches, -1) # [B, N, C*P*P]
-        
-        # The reconstruction head outputs 3*P*P, which is C*P*P if C=3.
-        # So the shapes match.
+        target_patches_pixel = F.unfold(x, kernel_size=P, stride=P).transpose(1, 2) # [B, N, C*P*P]
         
         # Calculate loss only on the masked patches
+        # The reconstruction head outputs 3*P*P, which matches C*P*P if C=3.
         loss = (recon_patches_flat[~mask] - target_patches_pixel[~mask]) ** 2
         loss = loss.mean()
         
@@ -331,7 +288,7 @@ class MAE(nn.Module):
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MAE().to(device)
-    dummy = torch.randn(8, 3, 224, 224).to(device) # Use a larger batch size to see performance benefits
+    dummy = torch.randn(8, 3, 224, 224).to(device)
     
     # The forward pass now returns loss, reconstruction, and mask
     loss, recon, mask = model(dummy)
@@ -339,7 +296,6 @@ if __name__ == "__main__":
     print("Reconstructed patch shape:", recon.shape)
     print("Loss:", loss.item())
     
-    # Expected shape: torch.Size([8, 196, 768]) where 768 = 16*16*3
     P = model.patch_size
     expected_shape = torch.Size([dummy.size(0), model.num_patches, 3 * P * P])
     assert recon.shape == expected_shape, f"Shape mismatch! Got {recon.shape}, expected {expected_shape}"

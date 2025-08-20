@@ -198,8 +198,6 @@ def create_vit_model(config: Dict) -> VisionTransformer:
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes'],
-        # droppath=model_config.get('droppath', 0.0)        
-        # layer_scale_init_value=float(model_config['layer_scale_init_value'])
     )
     return model
 
@@ -207,8 +205,6 @@ def create_vit_model(config: Dict) -> VisionTransformer:
 def create_timm_vit(config):  
     model_name = 'vit_base_patch16_224' 
     model_config = config['model']
-    
-    print(f"正在基于 '{model_name}' 创建模型，并使用自定义参数进行覆盖。")
     
     # 使用 timm.create_model 创建模型
     model = timm.create_model(
