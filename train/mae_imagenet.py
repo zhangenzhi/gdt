@@ -62,13 +62,13 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
         output_dir (str)
         prefix (str)
     """
-    # Detach tensors and move to CPU
-    original_img = original_img.cpu().permute(1, 2, 0).numpy() * 255
+    # Detach tensors, move to CPU, and cast to float32
+    original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy() * 255
+    # FIX: Cast recon_patches to float32 before converting to numpy
+    recon_patches = recon_patches.cpu().to(torch.float32).numpy()
+    
     H, W, C = original_img.shape
     N = mask.shape[0]
-    
-    # Un-normalize and reshape reconstructed patches
-    recon_patches = recon_patches.cpu().numpy()
     
     # Create the masked image
     masked_img = original_img.copy()
@@ -92,7 +92,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
-            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i] * 255
+            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i]
             
     # Convert to PIL Images
     original_pil = Image.fromarray(original_img.astype(np.uint8))
