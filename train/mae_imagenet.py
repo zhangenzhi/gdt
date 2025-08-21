@@ -310,12 +310,10 @@ def mae_imagenet_pretrain_single(args, config):
             model = DDP(model, device_ids=[local_rank], output_device=local_rank)
         else:
             model = DDP(model)
-
-    model_without_ddp = model.module
     
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
-        model_without_ddp.parameters(),
+        model.parameters(),
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
         betas=tuple(config['training'].get('betas', (0.9, 0.95))),
