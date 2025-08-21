@@ -2,8 +2,8 @@
 #SBATCH -A lrn075
 #SBATCH -o gdt_imagenet_vit_ddp.o%J
 #SBATCH -t 02:00:00
-#SBATCH -q debug
 #SBATCH -N 2
+#SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
 #SBATCH --mail-type=END
 
