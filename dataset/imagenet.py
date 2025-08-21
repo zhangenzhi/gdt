@@ -85,7 +85,53 @@ def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
     }
     
     return dataloaders
+
+def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    # MAE pre-training data augmentation
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(img_size, scale=(0.2, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
     
+    # Validation data augmentation
+    transform_val = transforms.Compose([
+        transforms.Resize(img_size + 32, interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
+    # 数据增强部分保持不变
+    data_transforms = {'train':transform_train, 'val': transform_val}
+
+    # 创建数据集
+    image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=data_transforms[x]) for x in ['train', 'val']}
+    samplers = {x: DistributedSampler(image_datasets[x], shuffle=True) for x in ['train', 'val']}
+    dataloaders = {
+        'train': DataLoader(
+            image_datasets['train'],
+            batch_size=batch_size,
+            num_workers=num_workers,     
+            pin_memory=True,              
+            sampler=samplers['train'],
+            drop_last=True                
+        ),
+        'val': DataLoader(
+            image_datasets['val'],
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            sampler=samplers['val']
+        )
+    }
+    
+    return dataloaders
+
 
 def create_imagenet_subset(original_dir, subset_dir, num_classes, imgs_per_class):
     """

@@ -13,7 +13,7 @@ from torch.amp import GradScaler, autocast
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
-from PIL import Image, ImageDraw, ImageFont
+from matplotlib import pyplot as plt
 import numpy as np
 
 sys.path.append("./")
@@ -50,7 +50,7 @@ def setup_ddp(rank, world_size):
 # --------------------------------------------- #
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
     """
-    Saves the original, masked, and reconstructed images with loss and step in the title.
+    Saves a single Matplotlib figure with the original, masked, and reconstructed images.
     
     Args:
         original_img (Tensor): [C, H, W]
@@ -63,8 +63,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
         prefix (str)
     """
     # Detach tensors, move to CPU, and cast to float32
-    original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy() * 255
-    # FIX: Cast recon_patches to float32 before converting to numpy
+    original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
     recon_patches = recon_patches.cpu().to(torch.float32).numpy()
     
     H, W, C = original_img.shape
@@ -80,11 +79,10 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
-            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 127 # Grey color
+            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # Black color
             
     # Create the reconstructed image (fill in masked patches with reconstructed ones)
     reconstructed_img = original_img.copy()
-    # The reconstruction head outputs 3*P*P. We assume C=3.
     recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size).transpose(0, 2, 3, 1) # N, P, P, C
     
     for i in range(N):
@@ -94,35 +92,28 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i]
             
-    # Convert to PIL Images
-    original_pil = Image.fromarray(original_img.astype(np.uint8))
-    masked_pil = Image.fromarray(masked_img.astype(np.uint8))
-    reconstructed_pil = Image.fromarray(reconstructed_img.astype(np.uint8))
+    # Create the Matplotlib figure
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
 
-    # Add titles and save
-    draw = ImageDraw.Draw(original_pil)
-    title_text = f"Loss: {loss:.4f} | Step: {step}"
-    
-    # Try to find a font, or use default
-    try:
-        font = ImageFont.truetype("Arial.ttf", 24)
-    except IOError:
-        font = ImageFont.load_default()
-    
-    draw.text((10, 10), "Original", (255, 255, 255), font=font)
-    draw.text((10, 40), title_text, (255, 255, 255), font=font)
-    masked_draw = ImageDraw.Draw(masked_pil)
-    masked_draw.text((10, 10), "Masked Input", (255, 255, 255), font=font)
-    masked_draw.text((10, 40), title_text, (255, 255, 255), font=font)
-    reconstructed_draw = ImageDraw.Draw(reconstructed_pil)
-    reconstructed_draw.text((10, 10), "Reconstructed", (255, 255, 255), font=font)
-    reconstructed_draw.text((10, 40), title_text, (255, 255, 255), font=font)
+    # Plot original image
+    axes[0].imshow(np.clip(original_img, 0, 1))
+    axes[0].set_title("Original")
+    axes[0].axis('off')
+
+    # Plot masked image
+    axes[1].imshow(np.clip(masked_img, 0, 1))
+    axes[1].set_title("Masked Input")
+    axes[1].axis('off')
+
+    # Plot reconstructed image
+    axes[2].imshow(np.clip(reconstructed_img, 0, 1))
+    axes[2].set_title("Reconstructed")
+    axes[2].axis('off')
 
     os.makedirs(output_dir, exist_ok=True)
-    original_pil.save(os.path.join(output_dir, f"{prefix}_{step}_original.png"))
-    masked_pil.save(os.path.join(output_dir, f"{prefix}_{step}_masked.png"))
-    reconstructed_pil.save(os.path.join(output_dir, f"{prefix}_{step}_recon.png"))
-
+    plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
+    plt.close(fig) # Close the figure to free up memory
 
 # --------------------------------------------- #
 #   MAE 预训练核心逻辑 (MAE Pre-training Core Logic)
