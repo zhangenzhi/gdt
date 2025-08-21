@@ -18,7 +18,7 @@ import numpy as np
 
 sys.path.append("./")
 from model.mae import MAE
-from dataset.imagenet import imagenet_distribute
+from dataset.imagenet import build_mae_dataloaders
 from dataset.utlis import param_groups_lrd # Still useful for LRD
 
 def setup_logging(args):
@@ -282,7 +282,7 @@ def mae_imagenet_pretrain_single(args, config):
     args.batch_size = config['training']['batch_size']
     args.patch_size = config['model']['patch_size'] # Get patch size for visualization
     
-    dataloaders = imagenet_distribute(
+    dataloaders = build_mae_dataloaders(
         img_size=args.img_size,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
