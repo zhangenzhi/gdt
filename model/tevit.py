@@ -5,8 +5,6 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP 
 import torch.multiprocessing as mp 
 import os
-# modify batch size according to GPU memory 
-batch_size = 64 
 
 from timm.models.vision_transformer import VisionTransformer 
 
@@ -60,11 +58,12 @@ def main():
 
     # create dataset and dataloader
     train_set = FakeDataset()
+    batch_size = 1024 
     # Use DistributedSampler for distributed training
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size,
-        num_workers=12, pin_memory=True, sampler=train_sampler)
+        num_workers=32, pin_memory=True, sampler=train_sampler)
 
     # define ViT-Huge model
     model = VisionTransformer(
