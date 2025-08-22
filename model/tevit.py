@@ -111,7 +111,7 @@ def main():
     # Only print from the main process to avoid cluttered logs
     if local_rank == 0:
         if count > 0:
-            print(f'average step time: {summ/count}')
+            print(f'average step time: {summ/count}, total: {summ}')
         else:
             print('Not enough steps to measure average time.')
 
