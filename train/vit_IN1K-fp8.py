@@ -23,86 +23,247 @@ from timm.models.vision_transformer import Block
 import transformer_engine.pytorch as te
 from transformer_engine.common import recipe as te_recipe
 
+from __future__ import annotations
+import logging
+from typing import Any, Dict, Optional
 
-# --- 模型创建和替换 ---
+import torch
+import torch.nn as nn
+import torch.distributed as dist
 
-def create_timm_vit(config: Dict[str, Any]) -> nn.Module:
-    """使用 timm.create_model 创建一个标准的 Vision Transformer 模型。"""
-    model_config = config['model']
-    model_name = 'vit_base_patch16_224' 
-    model = timm.create_model(
-        model_name=model_name,
-        pretrained=model_config.get('pretrained', False),
-        num_classes=model_config.get('num_classes', 1000),
-        img_size=model_config.get('img_size', 224),
-        drop_path_rate=model_config.get('drop_path_rate', 0.1),
-    )
-    return model
 
-def create_timm_vit_with_te_blocks(config: Dict[str, Any], device: torch.device) -> nn.Module:
+import transformer_engine.pytorch as te
+from transformer_engine.pytorch import fp8
+
+
+from timm.models.vision_transformer import Block as TimmBlock
+from timm import create_model as timm_create_model
+
+
+# -------------------------------
+# Utilities
+# -------------------------------
+
+def _get_rank0() -> bool:
+    return dist.is_available() and dist.is_initialized() and dist.get_rank() == 0
+
+
+def _maybe_log(msg: str):
+    if _get_rank0():
+        logging.info(msg)
+
+
+# -------------------------------
+# TE-based ViT Block (drop-in for timm Block)
+# -------------------------------
+class TEViTBlock(nn.Module):
+    """Transformer block using Transformer Engine fused ops.
+
+    Structure mimics timm's Block: LN1 -> Attn -> DropPath -> residual -> LN2 -> MLP -> DropPath -> residual.
+    We explicitly use TE's LayerNormLinear for (LN + Linear) fusions and TE's FusedAttention.
+
+    This keeps the outer interface consistent so it can replace timm blocks one-by-one.
     """
-    创建一个 timm ViT 模型，并将其 Transformer Blocks 替换为 Transformer Engine 的版本。
-    """
-    if dist.get_rank() == 0:
-        logging.info("正在创建 timm ViT 模型...")
-    model = create_timm_vit(config)
-    
-    if dist.get_rank() == 0:
-        logging.info("正在将 timm Blocks 替换为 Transformer Engine Blocks...")
 
-    # 遍历并替换模型中的每一个 Block
-    for i, timm_block in enumerate(model.blocks):
-        # 从 timm block 获取配置参数
-        hidden_size = timm_block.attn.proj.in_features
-        num_heads = timm_block.attn.num_heads
-        mlp_hidden_size = timm_block.mlp.fc1.out_features
+    def __init__(self, timm_block: TimmBlock):
+        super().__init__()
+        # Extract shapes from the reference timm block
+        d_model = timm_block.attn.proj.in_features
+        nheads = timm_block.attn.num_heads
+        mlp_hidden = timm_block.mlp.fc1.out_features
+        attn_drop = float(timm_block.attn.attn_drop.p)
+        proj_drop = float(timm_block.attn.proj_drop.p)
+        ln_eps = float(timm_block.norm1.eps)
+        self.drop_path = getattr(timm_block, 'drop_path', nn.Identity())
 
-        # 创建一个 Transformer Engine (TE) block
-        te_block = te.TransformerLayer(
-            hidden_size=hidden_size,
-            ffn_hidden_size=mlp_hidden_size,
-            num_attention_heads=num_heads,
-            # 确保 TE block 的参数与 timm block 匹配
-            bias=True, 
-            activation='gelu',
-            attention_dropout=timm_block.attn.attn_drop.p,
-            hidden_dropout=timm_block.attn.proj_drop.p,
-            # TE 使用融合的 LayerNorm
-            layernorm_epsilon=timm_block.norm1.eps, 
-            # 将 TE block 初始化为与 timm 相同的权重
-            init_method=lambda w: w, 
+        # --- QKV (LN + Linear) fused ---
+        self.qkv = te.LayerNormLinear(
+            d_model,
+            3 * d_model,
+            bias=True,
+            eps=ln_eps,
         )
+        # Attention (fused)
+        self.attn = te.MultiheadAttention(
+            hidden_size=d_model,
+            num_attention_heads=nheads,
+            attention_dropout=attn_drop,
+            fuse_qkv_params=False,  # we supply qkv explicitly via LayerNormLinear
+        )
+        # Output projection
+        self.proj = te.Linear(d_model, d_model, bias=True)
+        self.proj_drop = nn.Dropout(proj_drop) if proj_drop > 0 else nn.Identity()
 
-        # --- 权重复制 ---
-        # 这是一个关键步骤，确保预训练的权重被保留
-        with torch.no_grad():
-            # 复制 LayerNorm 1 (Attention前的LN)
-            te_block.self_attention.layernorm_qkv.layernorm_weight.copy_(timm_block.norm1.weight)
-            te_block.self_attention.layernorm_qkv.layernorm_bias.copy_(timm_block.norm1.bias)
-            
-            # 复制 QKV 权重和偏置 (这是LayerNormLinear的线性部分)
-            te_block.self_attention.layernorm_qkv.weight.copy_(timm_block.attn.qkv.weight)
-            te_block.self_attention.layernorm_qkv.bias.copy_(timm_block.attn.qkv.bias)
-            
-            # 复制 Attention Proj 权重和偏置
-            te_block.self_attention.proj.weight.copy_(timm_block.attn.proj.weight)
-            te_block.self_attention.proj.bias.copy_(timm_block.attn.proj.bias)
-            
-            # 复制 LayerNorm 2 (MLP前的LN)
-            te_block.layernorm_mlp.weight.copy_(timm_block.norm2.weight)
-            te_block.layernorm_mlp.bias.copy_(timm_block.norm2.bias)
-            
-            # 复制 MLP (fc1 和 fc2)
-            te_block.mlp.fc1.weight.copy_(timm_block.mlp.fc1.weight)
-            te_block.mlp.fc1.bias.copy_(timm_block.mlp.fc1.bias)
-            te_block.mlp.fc2.weight.copy_(timm_block.mlp.fc2.weight)
-            te_block.mlp.fc2.bias.copy_(timm_block.mlp.fc2.bias)
+        # --- MLP with fused LN+Linear on the first layer ---
+        self.mlp_fc1 = te.LayerNormLinear(d_model, mlp_hidden, bias=True, eps=ln_eps)
+        self.act = nn.GELU()
+        self.mlp_fc2 = te.Linear(mlp_hidden, d_model, bias=True)
+        self.mlp_drop = getattr(timm_block.mlp, 'drop', nn.Identity())
 
-        # 用新的 TE block 替换旧的 timm block
-        model.blocks[i] = te_block.to(device)
+        # Keep for weight mapping
+        self._timm_block = timm_block
+        self._map_weights_from_timm()
 
-    if dist.get_rank() == 0:
-        logging.info("所有 timm Blocks 已成功替换。")
+    def _split_qkv(self, qkv_weight: torch.Tensor, qkv_bias: torch.Tensor, nheads: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Split timm's fused qkv [3*d, d] into separate q,k,v for TE MHA shape [d, d].
+        We load into LayerNormLinear which expects a single combined linear of size 3*d, so we keep it fused.
+        Return values are kept only if you'd like to debug individual projections.
+        """
+        d3, d = qkv_weight.shape
+        assert d3 % 3 == 0
+        d_model = d
+        qw, kw, vw = torch.split(qkv_weight, d_model, dim=0)
+        qb, kb, vb = torch.split(qkv_bias, d_model, dim=0)
+        return qw, kw, vw, qb, kb, vb
+
+    @torch.no_grad()
+    def _map_weights_from_timm(self):
+        tb = self._timm_block
+        # --- Map LN1 + QKV ---
+        # LayerNormLinear has separate (layernorm_weight/bias) and (weight/bias) for the linear.
+        self.qkv.layernorm_weight.copy_(tb.norm1.weight)
+        self.qkv.layernorm_bias.copy_(tb.norm1.bias)
+        self.qkv.weight.copy_(tb.attn.qkv.weight)
+        if tb.attn.qkv.bias is not None:
+            self.qkv.bias.copy_(tb.attn.qkv.bias)
+
+        # --- Attention output proj ---
+        self.proj.weight.copy_(tb.attn.proj.weight)
+        if tb.attn.proj.bias is not None:
+            self.proj.bias.copy_(tb.attn.proj.bias)
+
+        # --- Map LN2 + MLP ---
+        self.mlp_fc1.layernorm_weight.copy_(tb.norm2.weight)
+        self.mlp_fc1.layernorm_bias.copy_(tb.norm2.bias)
+        self.mlp_fc1.weight.copy_(tb.mlp.fc1.weight)
+        if tb.mlp.fc1.bias is not None:
+            self.mlp_fc1.bias.copy_(tb.mlp.fc1.bias)
+
+        self.mlp_fc2.weight.copy_(tb.mlp.fc2.weight)
+        if tb.mlp.fc2.bias is not None:
+            self.mlp_fc2.bias.copy_(tb.mlp.fc2.bias)
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Residual 1: Attention
+        residual = x
+        # qkv: fused LN + linear
+        qkv = self.qkv(x)
+        # TE MHA expects [S, B, D] by default; our tensors are [B, S, D]
+        B, S, D = x.shape
+        qkv = qkv.view(B, S, 3, D).permute(1, 0, 2, 3).contiguous()  # [S,B,3,D]
+        # Fused MHA returns [S, B, D]
+        out = self.attn(qkv, attn_mask=attn_mask)
+        out = out.permute(1, 0, 2).contiguous()  # [B,S,D]
+        out = self.proj_drop(self.proj(out))
+        x = residual + self.drop_path(out)
+
+        # Residual 2: MLP
+        residual = x
+        y = self.mlp_fc2(self.act(self.mlp_fc1(x)))
+        y = self.mlp_drop(y)
+        x = residual + self.drop_path(y)
+        return x
+
+
+# -------------------------------
+# Patch Embed wrapper (use timm's)
+# -------------------------------
+class IdentityLayer(nn.Module):
+    def forward(self, x):
+        return x
+
+
+class TEViT(nn.Module):
+    """A ViT that uses timm's stem/head, with TE blocks in the encoder."""
+    def __init__(self, timm_model: nn.Module, use_cls_token: bool = True):
+        super().__init__()
+        self.patch_embed = timm_model.patch_embed
+        self.pos_drop = timm_model.pos_drop
+        self.cls_token = getattr(timm_model, 'cls_token', None) if use_cls_token else None
+        self.pos_embed = timm_model.pos_embed
+        self.norm = timm_model.norm
+        self.pre_logits = getattr(timm_model, 'pre_logits', IdentityLayer())
+        self.head = timm_model.head
+
+        # Replace blocks with TE blocks
+        self.blocks = nn.ModuleList([TEViTBlock(b) for b in timm_model.blocks])
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.patch_embed(x)
+        if self.cls_token is not None:
+            cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
+
+        # TE MHA expects sequence-first; we handle layout inside the block
+        for blk in self.blocks:
+            x = blk(x)
+        x = self.norm(x)
+        if self.cls_token is not None:
+            return self.pre_logits(x[:, 0])
+        else:
+            return x.mean(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.forward_features(x)
+        x = self.head(x)
+        return x
+
+
+# -------------------------------
+# FP8 wrapper
+# -------------------------------
+class FP8AutocastWrapper(nn.Module):
+    def __init__(self, module: nn.Module, enabled: bool = True, autocast: bool = True, margin: int = 0):
+        super().__init__()
+        self.module = module
+        self.enabled = enabled and fp8.is_fp8_available()
+        self.autocast = autocast
+        self.margin = margin
+
+    def forward(self, *args, **kwargs):
+        if self.enabled and self.autocast:
+            with fp8.autocast(enabled=True, fp8_margin=self.margin):
+                return self.module(*args, **kwargs)
+        return self.module(*args, **kwargs)
+
+
+# -------------------------------
+# Factory
+# -------------------------------
+
+def create_vit_with_te(config: Dict[str, Any], device: torch.device) -> nn.Module:
+    """Create a timm ViT and replace blocks with TE fused blocks.
+
+    config keys:
+      - timm_model: str, e.g., 'vit_base_patch16_224'
+      - pretrained: bool
+      - drop_path: float (optional, will be respected via copied drop_path)
+      - fp8: dict(enabled: bool, autocast: bool, margin: int)
+    """
+    timm_model_name = config.get('timm_model', 'vit_base_patch16_224')
+    pretrained = bool(config.get('pretrained', True))
+
+    _maybe_log(f"Creating timm model: {timm_model_name}, pretrained={pretrained}")
+    tm = timm_create_model(timm_model_name, pretrained=pretrained)
+
+    # Build TE ViT
+    _maybe_log("Replacing timm blocks with Transformer Engine blocks...")
+    model = TEViT(tm).to(device)
+
+    # Optional FP8
+    fp8_cfg = config.get('fp8', {"enabled": False})
+    if fp8_cfg and fp8_cfg.get('enabled', False):
+        model = FP8AutocastWrapper(
+            model,
+            enabled=True,
+            autocast=fp8_cfg.get('autocast', True),
+            margin=int(fp8_cfg.get('margin', 0)),
+        )
+        _maybe_log("Wrapped model with FP8 autocast.")
+
+    _maybe_log("Done. TE blocks in place.")
     return model
 
 # --- 核心代码 (与之前版本类似，但更加通用) ---
@@ -234,7 +395,7 @@ def main_worker(args, config):
     dataloaders = {'train': train_loader, 'val': val_loader}
     
     # --- 模型创建和转换 ---
-    model = create_timm_vit_with_te_blocks(config, device)
+    model = create_vit_with_te(config, device)
     model = DDP(model, device_ids=[local_rank])
 
     # --- 优化器和调度器 ---
