@@ -39,7 +39,8 @@ class TE_Block(te.transformer.TransformerLayer):
             drop_path=0., 
             act_layer=None, 
             norm_layer=None, 
-            mlp_layer=None 
+            mlp_layer=None,
+            **kwargs
     ): 
         super().__init__( 
             hidden_size=dim, 
@@ -49,66 +50,73 @@ class TE_Block(te.transformer.TransformerLayer):
             attention_dropout=attn_drop 
             )
         
+def main():
+    # FIX 2: Configure process for torchrun
+    # torchrun will set environment variables like RANK, LOCAL_RANK, and WORLD_SIZE
+    dist.init_process_group("nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    device = torch.cuda.current_device()
 
-def mp_fn(local_rank, *args): 
-    # configure process 
-    dist.init_process_group("nccl", 
-                            rank=local_rank, 
-                            world_size=torch.cuda.device_count()) 
-    torch.cuda.set_device(local_rank) 
-    device = torch.cuda.current_device() 
- 
-    # create dataset and dataloader 
-    train_set = FakeDataset() 
-    train_loader = torch.utils.data.DataLoader( 
-        train_set, batch_size=batch_size, 
-        num_workers=12, pin_memory=True) 
+    # create dataset and dataloader
+    train_set = FakeDataset()
+    # Use DistributedSampler for distributed training
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
+    train_loader = torch.utils.data.DataLoader(
+        train_set, batch_size=batch_size,
+        num_workers=12, pin_memory=True, sampler=train_sampler)
 
-    # define ViT-Huge model 
-    model = VisionTransformer( 
-            embed_dim=1280, 
-            depth=32, 
+    # define ViT-Huge model
+    model = VisionTransformer(
+            embed_dim=1280,
+            depth=32,
             num_heads=16,
-            block_fn=TE_Block  
-        ).cuda(device) 
-    model = DDP(model, device_ids=[local_rank]) 
+            block_fn=TE_Block
+        ).cuda(device)
+    model = DDP(model, device_ids=[local_rank])
 
-    # define loss and optimizer 
-    criterion = torch.nn.CrossEntropyLoss() 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9) 
+    # define loss and optimizer
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-    model.train() 
+    model.train()
 
-    t0 = time.perf_counter() 
-    summ = 0 
-    count = 0 
+    t0 = time.perf_counter()
+    summ = 0
+    count = 0
 
-    for step, data in enumerate(train_loader): 
-        # copy data to GPU 
-        inputs = data[0].to(device=device, non_blocking=True) 
-        label = data[1].squeeze(-1).to(device=device, non_blocking=True) 
- 
-        # use mixed precision to take advantage of bfloat16 support 
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16): 
-            outputs = model(inputs) 
-            loss = criterion(outputs, label) 
-        optimizer.zero_grad(set_to_none=True) 
-        loss.backward() 
-        optimizer.step() 
- 
-        # capture step time 
-        batch_time = time.perf_counter() - t0 
-        if step > 10:  # skip first steps 
-            summ += batch_time 
-            count += 1 
-        t0 = time.perf_counter() 
-        if step > 50: 
-            break 
-    print(f'average step time: {summ/count}') 
+    # Set epoch for sampler to ensure data shuffling
+    train_loader.sampler.set_epoch(0)
 
+    for step, data in enumerate(train_loader):
+        # copy data to GPU
+        inputs = data[0].to(device=device, non_blocking=True)
+        label = data[1].squeeze(-1).to(device=device, non_blocking=True)
 
-if __name__ == '__main__': 
-    mp.spawn(mp_fn, 
-             args=(), 
-             nprocs=torch.cuda.device_count(), 
-             join=True)
+        # use mixed precision to take advantage of bfloat16 support
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            outputs = model(inputs)
+            loss = criterion(outputs, label)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+        # capture step time
+        batch_time = time.perf_counter() - t0
+        if step > 10:  # skip first steps
+            summ += batch_time
+            count += 1
+        t0 = time.perf_counter()
+        if step > 50:
+            break
+    
+    # Only print from the main process to avoid cluttered logs
+    if local_rank == 0:
+        if count > 0:
+            print(f'average step time: {summ/count}')
+        else:
+            print('Not enough steps to measure average time.')
+
+if __name__ == '__main__':
+    # FIX 2: Remove mp.spawn and call main function directly
+    main()
