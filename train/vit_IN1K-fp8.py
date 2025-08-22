@@ -29,8 +29,9 @@ from transformer_engine.common import recipe as te_recipe
 def create_timm_vit(config: Dict[str, Any]) -> nn.Module:
     """使用 timm.create_model 创建一个标准的 Vision Transformer 模型。"""
     model_config = config['model']
+    model_name = 'vit_base_patch16_224' 
     model = timm.create_model(
-        model_name=model_config['name'],
+        model_name=model_name,
         pretrained=model_config.get('pretrained', False),
         num_classes=model_config.get('num_classes', 1000),
         img_size=model_config.get('img_size', 224),
