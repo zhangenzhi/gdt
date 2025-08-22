@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, 
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import GradScaler, autocast 
 
+
 # Import the baseline ViT model and the dataset functions
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
@@ -58,16 +59,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
-    # *** FP8 特有改动: 根据开关设置 autocast 的 dtype ***
-    # 选择数据类型
-    autocast_dtype = torch.float8_e4m3fn if config['training']["use_fp8"] else torch.bfloat16
-    
     if is_main_process:
-        if config['training']["use_fp8"]:
-            logging.info("Starting ViT training with Native FP8...")
-        else:
-            logging.info("Starting ViT training with BF16 AMP...")
-        
+        logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)   
+        logging.info("开始BF16优化训练...")
         logging.info(f"torch.compile: {config['training'].get('use_compile', False)}, Fused Optimizer: {config['training'].get('use_fused_optimizer', False)}, Activation Checkpointing: {config['training'].get('use_checkpointing', False)}")
         logging.info(f"将从 Epoch {start_epoch + 1} 开始训练...")
         
@@ -92,8 +86,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
             
             with sync_context:
-                # *** FP8 特有改动: 使用动态选择的 autocast_dtype ***
-                with autocast(device_type='cuda', dtype=autocast_dtype):
+                with autocast(device_type='cuda', dtype=torch.bfloat16):
                     outputs = model(images)
                     loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
@@ -125,7 +118,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             model, 
             val_loader, 
             device_id, 
-            args=args, # *** 新增: 传递 args 参数 ***
             is_ddp=is_ddp
         )
                 
@@ -164,16 +156,12 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
 
 
-def evaluate_model_compatible(model, val_loader, device, args, is_ddp=False):
+def evaluate_model_compatible(model, val_loader, device, is_ddp=False):
     """评估函数。"""
     model.eval()
     correct, total = 0, 0
-    
-    # *** FP8 特有改动: 评估时也使用对应的精度 ***
-    autocast_dtype = torch.float8_e4m3fn if config['training']["use_fp8"] else torch.bfloat16
-    
     with torch.no_grad():
-        with autocast(device_type='cuda', dtype=autocast_dtype):
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
             for images, labels in val_loader:
                 images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
                 outputs = model(images)
@@ -307,11 +295,7 @@ def vit_imagenet_train_single(args, config):
 
     if local_rank == 0:
         setup_logging(args)
-        # *** FP8 特有改动: 日志中明确说明是否启用FP8 ***
-        if config['training']["use_fp8"]:
-            logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}, 开启 FP8 模式")
-        else:
-            logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}")
+        logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}")
 
     args.img_size = config['model']['img_size']
     args.batch_size = config['training']['batch_size']
@@ -363,7 +347,7 @@ def vit_imagenet_train_single(args, config):
     
     if num_warmup_steps > 0:
         # 预热调度器：从一个很小的值线性增长到1
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.06, total_iters=num_warmup_steps)
         # 主调度器：在预热结束后，进行余弦退火
         main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
         # 使用SequentialLR将两者串联起来
@@ -430,3 +414,5 @@ if __name__ == "__main__":
     os.makedirs(args.output, exist_ok=True)
     
     vit_imagenet_train_single(args, config)
+    
+    

@@ -7,9 +7,9 @@ import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import training functions from both training scripts
-from train.gdt_vit_ddp import gdt_imagenet_train, gdt_imagenet_train_local
+from train.gdt_vit import gdt_imagenet_train, gdt_imagenet_train_local
 # --- FIXED: Corrected import to match the function names in the provided script ---
-from train.vit_imagenet_ddp import vit_imagenet_train, vit_imagenet_train_single
+from train.vit_imagenet import vit_imagenet_train, vit_imagenet_train_single
 
 def main():
     parser = argparse.ArgumentParser(description='Launcher for Vision Transformer Training')
