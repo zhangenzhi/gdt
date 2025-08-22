@@ -67,9 +67,9 @@ def main():
 
     # define ViT-Huge model
     model = VisionTransformer(
-            embed_dim=1280,
-            depth=32,
-            num_heads=16,
+            embed_dim=768,
+            depth=12,
+            num_heads=12,
             block_fn=TE_Block
         ).cuda(device)
     model = DDP(model, device_ids=[local_rank])
