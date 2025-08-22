@@ -77,13 +77,12 @@ def create_timm_vit_with_te_blocks(config: Dict[str, Any], device: torch.device)
         # 这是一个关键步骤，确保预训练的权重被保留
         with torch.no_grad():
             # 复制 LayerNorm 1 (Attention前的LN)
-            te_block.self_attention.layernorm_qkv.weight.copy_(timm_block.norm1.weight)
-            te_block.self_attention.layernorm_qkv.bias.copy_(timm_block.norm1.bias)
+            te_block.self_attention.layernorm_qkv.layernorm_weight.copy_(timm_block.norm1.weight)
+            te_block.self_attention.layernorm_qkv.layernorm_bias.copy_(timm_block.norm1.bias)
             
-            # 复制 QKV 权重和偏置
-            # timm 将 Q, K, V 权重合并在一个张量中，TE 也期望如此
-            te_block.self_attention.query_key_value.weight.copy_(timm_block.attn.qkv.weight)
-            te_block.self_attention.query_key_value.bias.copy_(timm_block.attn.qkv.bias)
+            # 复制 QKV 权重和偏置 (这是LayerNormLinear的线性部分)
+            te_block.self_attention.layernorm_qkv.weight.copy_(timm_block.attn.qkv.weight)
+            te_block.self_attention.layernorm_qkv.bias.copy_(timm_block.attn.qkv.bias)
             
             # 复制 Attention Proj 权重和偏置
             te_block.self_attention.proj.weight.copy_(timm_block.attn.proj.weight)
