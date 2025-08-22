@@ -23,7 +23,6 @@ from timm.models.vision_transformer import Block
 import transformer_engine.pytorch as te
 from transformer_engine.common import recipe as te_recipe
 
-from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
