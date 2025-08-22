@@ -58,7 +58,7 @@ def main():
 
     # create dataset and dataloader
     train_set = FakeDataset()
-    batch_size = 256 
+    batch_size = 64 
     # Use DistributedSampler for distributed training
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
