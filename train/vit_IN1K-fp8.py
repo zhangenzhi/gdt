@@ -13,22 +13,16 @@ import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-# 导入 timm
-try:
-    import timm
-    from timm.data import create_dataset, create_loader, resolve_data_config, Mixup
-    from timm.models.vision_transformer import Block
-except ImportError:
-    print("timm 未安装。请运行 'pip install timm'")
-    sys.exit(1)
+
+import timm
+from timm.data import create_dataset, create_loader, resolve_data_config, Mixup
+from timm.models.vision_transformer import Block
+
 
 # 导入 Transformer Engine
-try:
-    import transformer_engine.pytorch as te
-    from transformer_engine.common.recipe import Format, fp8_recipe
-except ImportError:
-    print("Transformer Engine 未安装。请运行 'pip install transformer-engine'")
-    sys.exit(1)
+import transformer_engine.pytorch as te
+from transformer_engine.common.recipe import Format, fp8_recipe
+
 
 # --- 模型创建和替换 ---
 
@@ -255,7 +249,7 @@ def main_worker(args, config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ViT FP8/BF16 Training Script with timm and TE")
-    parser.add_argument('--config', type=str, required=True, help='Path to the YAML config file.')
+    parser.add_argument('--config', type=str, default='./configs/vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='vit-fp8-timm-run', help='Subdirectory for logs/models')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to dataset')
