@@ -18,7 +18,7 @@ from transformer_engine.common import recipe
 # use random data 
 class FakeDataset(Dataset): 
     def __len__(self): 
-        return 1000000 
+        return 1281167 
 
     def __getitem__(self, index): 
         rand_image = torch.randn([3, 224, 224], dtype=torch.float32) 
@@ -51,8 +51,6 @@ class TE_Block(te.transformer.TransformerLayer):
             )
         
 def main():
-    # FIX 2: Configure process for torchrun
-    # torchrun will set environment variables like RANK, LOCAL_RANK, and WORLD_SIZE
     dist.init_process_group("nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
@@ -107,7 +105,7 @@ def main():
             summ += batch_time
             count += 1
         t0 = time.perf_counter()
-        if step > 50:
+        if step > 312:
             break
     
     # Only print from the main process to avoid cluttered logs
