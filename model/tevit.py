@@ -6,7 +6,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import torch.multiprocessing as mp 
 import os
 # modify batch size according to GPU memory 
-batch_size = 64 
+batch_size = 1024 
 
 from timm.models.vision_transformer import VisionTransformer 
 
