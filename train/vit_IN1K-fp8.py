@@ -21,7 +21,7 @@ from timm.models.vision_transformer import Block
 
 # 导入 Transformer Engine
 import transformer_engine.pytorch as te
-from transformer_engine.common.recipe import Format, fp8_recipe
+from transformer_engine.common import recipe as te_recipe
 
 
 # --- 模型创建和替换 ---
@@ -129,7 +129,7 @@ def train_loop(model, train_loader, val_loader, criterion, optimizer, scheduler,
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
     is_main_process = dist.get_rank() == 0
 
-    fp8_recipe_obj = fp8_recipe(fp8_format=Format.E4M3, amax_history_len=16, amax_compute_algo="max")
+    fp8_recipe_obj = te_recipe.fp8_recipe(fp8_format=te_recipe.Format.E4M3, amax_history_len=16, amax_compute_algo="max")
     
     if is_main_process:
         logging.info(f"启动训练，使用 {'Transformer Engine FP8' if args.use_fp8 else 'BF16'}...")
@@ -190,7 +190,7 @@ def evaluate_model(model, val_loader, device, args):
     correct, total = 0, 0
     autocast_ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16)
     if args.use_fp8:
-        fp8_recipe_obj = fp8_recipe(fp8_format=Format.E4M3)
+        fp8_recipe_obj = te_recipe.fp8_recipe(fp8_format=te_recipe.Format.E4M3)
         autocast_ctx = te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe_obj)
 
     with torch.no_grad(), autocast_ctx:
