@@ -97,30 +97,31 @@ def main():
 
     # Set epoch for sampler to ensure data shuffling
     train_loader.sampler.set_epoch(0)
+        
+    # use mixed precision to take advantage of bfloat16 support
+    with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+        for step, data in enumerate(train_loader):
+            # copy data to GPU
+            inputs = data[0].to(device=device, non_blocking=True)
+            label = data[1].squeeze(-1).to(device=device, non_blocking=True)
 
-    for step, data in enumerate(train_loader):
-        # copy data to GPU
-        inputs = data[0].to(device=device, non_blocking=True)
-        label = data[1].squeeze(-1).to(device=device, non_blocking=True)
 
-        # use mixed precision to take advantage of bfloat16 support
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-            with te.fp8_autocast(enabled=True, recipe=fp8_recipe): 
+            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe): 
                 outputs = model(inputs)
             # outputs = model(inputs)
             loss = criterion(outputs, label)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
 
-        # capture step time
-        batch_time = time.perf_counter() - t0
-        if step > 10:  # skip first steps
-            summ += batch_time
-            count += 1
-        t0 = time.perf_counter()
-        if step > 312:
-            break
+            # capture step time
+            batch_time = time.perf_counter() - t0
+            if step > 10:  # skip first steps
+                summ += batch_time
+                count += 1
+            t0 = time.perf_counter()
+            if step > 312:
+                break
     
     # Only print from the main process to avoid cluttered logs
     if local_rank == 0:
