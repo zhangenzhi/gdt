@@ -6,8 +6,6 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 import torch.multiprocessing as mp 
 import os
 
-# modify batch size according to GPU memory 
-batch_size = 1024 
 import torch.nn as nn
 from timm.models.vision_transformer import VisionTransformer 
 
@@ -15,6 +13,10 @@ from torch.utils.data import Dataset
 
 import transformer_engine.pytorch as te 
 from transformer_engine.common import recipe 
+
+
+# modify batch size according to GPU memory
+batch_size = 1280 
 
 # use random data 
 class FakeDataset(Dataset): 
