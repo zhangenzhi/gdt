@@ -259,7 +259,7 @@ def create_te_vit(config):
     
     # define ViT-Huge model
     model = VisionTransformer(
-        pretrained=model_config['pretrained'],
+        # pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
         img_size=model_config['img_size'],
         patch_size=model_config['patch_size'],
