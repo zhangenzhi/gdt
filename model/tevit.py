@@ -63,7 +63,7 @@ def main():
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size,
-        num_workers=32, pin_memory=False, sampler=train_sampler, drop_last=True)
+        num_workers=32, pin_memory=True, sampler=train_sampler, drop_last=True)
 
     # define ViT-Huge model
     model = VisionTransformer(
@@ -104,8 +104,6 @@ def main():
             # copy data to GPU
             inputs = data[0].to(device=device, non_blocking=True)
             label = data[1].squeeze(-1).to(device=device, non_blocking=True)
-
-
             with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe): 
                 outputs = model(inputs)
             # outputs = model(inputs)
