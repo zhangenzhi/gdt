@@ -19,7 +19,7 @@ from transformer_engine.common import recipe
 # use random data 
 class FakeDataset(Dataset): 
     def __len__(self): 
-        return 1024000 
+        return 1281167 
 
     def __getitem__(self, index): 
         rand_image = torch.randn([3, 224, 224], dtype=torch.float32) 
