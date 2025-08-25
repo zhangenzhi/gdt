@@ -93,7 +93,8 @@ def main():
 
         # use mixed precision to take advantage of bfloat16 support
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-            outputs = model(inputs)
+            with te.fp8_autocast(enabled=True): 
+                outputs = model(inputs)
             loss = criterion(outputs, label)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
