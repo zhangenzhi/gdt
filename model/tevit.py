@@ -63,7 +63,7 @@ def main():
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size,
-        num_workers=32, pin_memory=True, sampler=train_sampler, drop_last=True)
+        num_workers=0, pin_memory=False, sampler=train_sampler, drop_last=True)
 
     # define ViT-Huge model
     model = VisionTransformer(
@@ -78,7 +78,7 @@ def main():
         ).cuda(device)
     if dist.get_rank() == 0: 
         print("正在应用 torch.compile()...")
-        model = torch.compile(model)
+    model = torch.compile(model)
     model = DDP(model, device_ids=[local_rank])
 
     # define loss and optimizer
