@@ -165,6 +165,7 @@ def main():
             embed_dim=768,
             depth=12,
             num_heads=12,
+            embed_layer=TEPatchEmbedLinear,
             block_fn=TE_Block,
             mlp_layer=TE_MLP,
             norm_layer=te_norm_layer
