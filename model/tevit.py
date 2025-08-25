@@ -86,7 +86,11 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, fused=True)
 
     model.train()
-
+    # 为 FP8 训练创建 recipe
+    fp8_recipe = recipe.DelayedScaling(
+        margin=0, interval=1, fp8_format=recipe.Format.HYBRID
+    )
+    
     t0 = time.perf_counter()
     summ = 0
     count = 0
@@ -101,7 +105,7 @@ def main():
 
         # use mixed precision to take advantage of bfloat16 support
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-            with te.fp8_autocast(enabled=True): 
+            with te.fp8_autocast(enabled=True, recipe=fp8_recipe): 
                 outputs = model(inputs)
             # outputs = model(inputs)
             loss = criterion(outputs, label)
