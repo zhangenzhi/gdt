@@ -166,6 +166,7 @@ def main():
             depth=12,
             num_heads=12,
             block_fn=TE_Block,
+            mlp_layer=TE_MLP,
             norm_layer=te_norm_layer
         ).cuda(device)
     
