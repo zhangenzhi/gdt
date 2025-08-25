@@ -20,7 +20,9 @@ from torch.amp import GradScaler, autocast
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 # from model.vit import create_vit_model
-from model.vit import create_timm_vit as create_vit_model
+# from model.vit import create_timm_vit as create_vit_model
+from model.vit import create_te_vit as create_vit_model
+
 from dataset.utlis import param_groups_lrd
 
 def setup_logging(args):
@@ -391,7 +393,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm-fp8', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')

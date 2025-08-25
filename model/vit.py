@@ -183,7 +183,33 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
             outcome = x[:, 0]
 
         return outcome
-    
+
+import transformer_engine.pytorch as te
+class TE_Block(te.transformer.TransformerLayer): 
+    def __init__( 
+            self, 
+            dim, 
+            num_heads, 
+            mlp_ratio=4., 
+            qkv_bias=False, 
+            qk_norm=False, 
+            proj_drop=0., 
+            attn_drop=0., 
+            init_values=None, 
+            drop_path=0., 
+            act_layer=None, 
+            norm_layer=None, 
+            mlp_layer=None,
+            **kwargs
+    ): 
+        super().__init__( 
+            hidden_size=dim, 
+            ffn_hidden_size=int(dim * mlp_ratio), 
+            num_attention_heads=num_heads, 
+            hidden_dropout=proj_drop, 
+            attention_dropout=attn_drop 
+            )
+
 def create_vit_model(config: Dict) -> VisionTransformer:
     """
     Factory function to create a VisionTransformer from a config dictionary.
@@ -228,3 +254,26 @@ def create_timm_vit(config):
     
     return model
 
+def create_te_vit(config):
+    model_config = config['model']
+    
+    # define ViT-Huge model
+    model = VisionTransformer(
+        pretrained=model_config['pretrained'],
+        num_classes=model_config['num_classes'],
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_chans=model_config.get('in_channels', 3),
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        drop_path_rate=model_config.get('drop_path_rate', 0.1),
+        weight_init = 'jax_nlhb',
+        qkv_bias=True,
+        # qk_norm = True,
+        # init_values=1e-6,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        block_fn=TE_Block
+    )
+    return model
