@@ -16,7 +16,7 @@ from transformer_engine.common import recipe
 
 
 # modify batch size according to GPU memory
-batch_size = 1280 
+batch_size = 1536 
 
 # use random data 
 class FakeDataset(Dataset): 
