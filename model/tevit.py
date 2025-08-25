@@ -63,7 +63,7 @@ def main():
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size,
-        num_workers=32, pin_memory=True, sampler=train_sampler)
+        num_workers=32, pin_memory=True, sampler=train_sampler, drop_last=True)
 
     # define ViT-Huge model
     model = VisionTransformer(
