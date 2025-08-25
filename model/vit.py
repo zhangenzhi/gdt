@@ -8,6 +8,8 @@ import timm
 from timm.models.layers import DropPath
 import timm.models.vision_transformer
 
+import transformer_engine.pytorch as te
+
 class PatchEmbedding(nn.Module):
     """
     Image to Patch Embedding.
@@ -184,31 +186,6 @@ class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         return outcome
 
-import transformer_engine.pytorch as te
-class TE_Block(te.transformer.TransformerLayer): 
-    def __init__( 
-            self, 
-            dim, 
-            num_heads, 
-            mlp_ratio=4., 
-            qkv_bias=False, 
-            qk_norm=False, 
-            proj_drop=0., 
-            attn_drop=0., 
-            init_values=None, 
-            drop_path=0., 
-            act_layer=None, 
-            norm_layer=None, 
-            mlp_layer=None,
-            **kwargs
-    ): 
-        super().__init__( 
-            hidden_size=dim, 
-            ffn_hidden_size=int(dim * mlp_ratio), 
-            num_attention_heads=num_heads, 
-            hidden_dropout=proj_drop, 
-            attention_dropout=attn_drop 
-            )
 
 def create_vit_model(config: Dict) -> VisionTransformer:
     """
@@ -254,6 +231,118 @@ def create_timm_vit(config):
     
     return model
 
+class TE_Block(te.transformer.TransformerLayer): 
+    def __init__( 
+            self, 
+            dim, 
+            num_heads, 
+            mlp_ratio=4., 
+            qkv_bias=False, 
+            qk_norm=False, 
+            proj_drop=0., 
+            attn_drop=0., 
+            init_values=None, 
+            drop_path=0., 
+            act_layer=None, 
+            norm_layer=None, 
+            mlp_layer=None,
+            **kwargs
+    ): 
+        super().__init__( 
+            hidden_size=dim, 
+            ffn_hidden_size=int(dim * mlp_ratio), 
+            num_attention_heads=num_heads, 
+            hidden_dropout=proj_drop, 
+            attention_dropout=attn_drop 
+            )
+
+
+# -----------------------------
+# TE MLP
+# -----------------------------
+class TE_MLP(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, drop=0.0):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = te.Linear(in_features, hidden_features)
+        self.act = nn.GELU()
+        self.fc2 = te.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+# -----------------------------
+# TE Norm (LayerNorm)
+# -----------------------------
+class TE_Norm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.norm = te.LayerNorm(dim, eps=eps)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.norm(x)
+
+
+# =============================================
+# Add-ons: TE replacements for timm.VisionTransformer
+# =============================================
+class TEPatchEmbedLinear(nn.Module):
+    """Patch embedding via unfold + TE Linear so the projection participates in FP8.
+    API-compatible with timm's PatchEmbed where needed (num_patches, grid_size).
+    """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, **kwargs):
+        super().__init__()
+        img_size = (img_size, img_size) if isinstance(img_size, int) else img_size
+        patch_size = (patch_size, patch_size) if isinstance(patch_size, int) else patch_size
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
+        self.num_patches = self.grid_size[0] * self.grid_size[1]
+        patch_vec = in_chans * patch_size[0] * patch_size[1]
+        Linear = te.Linear 
+        self.proj = Linear(patch_vec, embed_dim, bias=True)
+        self.unfold = nn.Unfold(kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, C, H, W)
+        patches = self.unfold(x)          # (B, patch_vec, L)
+        patches = patches.transpose(1, 2) # (B, L, patch_vec)
+        x = self.proj(patches)            # (B, L, embed_dim)
+        return x
+
+
+class TE_MLP(nn.Module):
+    """timm-compatible MLP using TE Linear."""
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.0, **kwargs):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        Linear = te.Linear
+        self.fc1 = Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.drop1 = nn.Dropout(drop)
+        self.fc2 = Linear(hidden_features, out_features)
+        self.drop2 = nn.Dropout(drop)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop1(x)
+        x = self.fc2(x)
+        x = self.drop2(x)
+        return x
+
+
+def te_norm_layer(norm_dim, eps: float = 1e-6, **kwargs):
+    """Factory callable to pass into timm as norm_layer."""
+    return te.LayerNorm(norm_dim, eps=eps)
+
 def create_te_vit(config):
     model_config = config['model']
     
@@ -269,11 +358,13 @@ def create_te_vit(config):
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         drop_path_rate=model_config.get('drop_path_rate', 0.1),
-        weight_init = 'jax_nlhb',
+        # weight_init = 'jax_nlhb',
         qkv_bias=True,
         # qk_norm = True,
         # init_values=1e-6,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        block_fn=TE_Block
+        embed_layer=TEPatchEmbedLinear,
+        block_fn=TE_Block,
+        mlp_layer=TE_MLP,
+        norm_layer=te_norm_layer
     )
     return model

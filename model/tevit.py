@@ -87,8 +87,6 @@ class TE_Norm(nn.Module):
         return self.norm(x)
 
 
-
-
 # =============================================
 # Add-ons: TE replacements for timm.VisionTransformer
 # =============================================
@@ -172,16 +170,6 @@ def main():
             mlp_layer=TE_MLP,
             norm_layer=te_norm_layer
         ).cuda(device)
-    
-    # model = VisionTransformer(
-    # img_size=224, patch_size=16, in_chans=3, num_classes=1000,
-    # embed_dim=768, depth=12, num_heads=12,
-    # block_fn=TE_Block,
-    # embed_layer=TEPatchEmbedLinear,
-    # mlp_layer=TE_MLP,
-    # norm_layer=te_norm_layer)
-    # model.head = te.Linear(768, 1000, bias=True)
-    model = model.cuda(device)
     
     if dist.get_rank() == 0: 
         print("正在应用 torch.compile()...")

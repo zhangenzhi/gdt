@@ -14,6 +14,8 @@ import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import GradScaler, autocast 
+import transformer_engine.pytorch as te 
+from transformer_engine.common import recipe 
 
 
 # Import the baseline ViT model and the dataset functions
@@ -49,7 +51,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
-    
+    fp8_recipe = recipe.DelayedScaling(
+        margin=0, interval=16, fp8_format=recipe.Format.HYBRID
+    )
     mixup_fn = Mixup(
         mixup_alpha=0.8,
         cutmix_alpha=1.0,
@@ -89,7 +93,11 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
-                    outputs = model(images)
+                    if config["training"]["use_fp8"]:
+                        with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):  
+                            outputs = model(images)
+                    else:
+                        outputs = model(images)
                     loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
                 
