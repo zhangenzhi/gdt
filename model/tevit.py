@@ -166,6 +166,7 @@ def main():
             depth=12,
             num_heads=12,
             block_fn=TE_Block,
+            norm_layer=te_norm_layer
         ).cuda(device)
     
     # model = VisionTransformer(
