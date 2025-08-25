@@ -33,6 +33,6 @@ training:
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
   use_mixup: true
-  use_fp8: true
+  use_fp8: False
   use_postrain: False
   gradient_accumulation_steps: 1
