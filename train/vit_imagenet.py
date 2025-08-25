@@ -22,8 +22,8 @@ from transformer_engine.common import recipe
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 # from model.vit import create_vit_model
-# from model.vit import create_timm_vit as create_vit_model
-from model.vit import create_te_vit as create_vit_model
+from model.vit import create_timm_vit as create_vit_model
+# from model.vit import create_te_vit as create_vit_model
 
 from dataset.utlis import param_groups_lrd
 
