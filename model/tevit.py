@@ -5,6 +5,7 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP 
 import torch.multiprocessing as mp 
 import os
+
 # modify batch size according to GPU memory 
 batch_size = 1024 
 
@@ -18,7 +19,7 @@ from transformer_engine.common import recipe
 # use random data 
 class FakeDataset(Dataset): 
     def __len__(self): 
-        return 1281167 
+        return 1024000 
 
     def __getitem__(self, index): 
         rand_image = torch.randn([3, 224, 224], dtype=torch.float32) 
