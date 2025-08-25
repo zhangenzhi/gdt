@@ -63,7 +63,7 @@ def main():
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size,
-        num_workers=0, pin_memory=False, sampler=train_sampler, drop_last=True)
+        num_workers=32, pin_memory=False, sampler=train_sampler, drop_last=True)
 
     # define ViT-Huge model
     model = VisionTransformer(
@@ -74,7 +74,7 @@ def main():
             embed_dim=768,
             depth=12,
             num_heads=12,
-            block_fn=TE_Block
+            block_fn=TE_Block,
         ).cuda(device)
     if dist.get_rank() == 0: 
         print("正在应用 torch.compile()...")
@@ -88,7 +88,7 @@ def main():
     model.train()
     # 为 FP8 训练创建 recipe
     fp8_recipe = recipe.DelayedScaling(
-        margin=0, interval=1, fp8_format=recipe.Format.HYBRID
+        margin=0, interval=16, fp8_format=recipe.Format.HYBRID
     )
     
     t0 = time.perf_counter()
