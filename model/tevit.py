@@ -76,11 +76,14 @@ def main():
             num_heads=12,
             block_fn=TE_Block
         ).cuda(device)
+    if dist.get_rank() == 0: 
+        print("正在应用 torch.compile()...")
+        model = torch.compile(model)
     model = DDP(model, device_ids=[local_rank])
 
     # define loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, fused=True)
 
     model.train()
 
