@@ -66,8 +66,8 @@ class MAEEncoder(nn.Module):
 
     # REVISED: Forward pass simplified to work with pre-selected tokens
     def forward(self, x: torch.Tensor, ids_keep: torch.Tensor):
-        import pdb;pdb.set_trace()
-        B, _, _ = x.shape
+        # CORRECTED: Get batch size from 4D tensor
+        B = x.shape[0]
 
         # Patchify and add positional embeddings
         x = self.patch_embed(x)
@@ -200,7 +200,6 @@ class MAE(nn.Module):
 
     # REVISED: Fixed-ratio masking using randperm
     def random_masking(self, x: torch.Tensor):
-        
         B, N, D = x.shape
         len_keep = int(N * (1 - self.mask_ratio))
 
@@ -237,7 +236,7 @@ class MAE(nn.Module):
     def forward(self, x: torch.Tensor):
         # Generate fixed-ratio mask and corresponding indices
         # We patchify the image inside the encoder now
-        ids_keep, mask, ids_restore = self.random_masking(
+        _, ids_keep, mask, ids_restore = self.random_masking(
             torch.zeros(x.shape[0], self.num_patches, 1, device=x.device)
         )
         
