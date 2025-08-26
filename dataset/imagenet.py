@@ -94,7 +94,6 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     # MAE pre-training data augmentation
     transform_train = transforms.Compose([
         transforms.RandomResizedCrop(img_size, scale=(0.2, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])

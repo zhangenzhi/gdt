@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.nn.utils.rnn import pad_sequence
-from torch.amp import autocast
+from torch.cuda.amp import autocast 
 
 # --------------------------------------------- #
 #   1️⃣  Patch embedding
@@ -67,16 +67,18 @@ class MAEEncoder(nn.Module):
     def forward(self, x: torch.Tensor, mask: torch.BoolTensor):
         B, _, _, _ = x.shape
         x = self.patch_embed(x)
+        # 添加位置编码
         x = x + self.pos_embed
         x = self.pos_drop(x)
-        visible_patches_list = [x[i][mask[i]] for i in range(B)]
+        # 取出可见 token（mask=False）
+        visible_patches_list = [x[i][~mask[i]] for i in range(B)]
         padded_visible_patches = pad_sequence(visible_patches_list, batch_first=True)
-        num_visible = mask.sum(dim=1)
+        num_visible = (~mask).sum(dim=1)
         max_vis = num_visible.max()
         padding_mask = torch.arange(max_vis, device=x.device)[None, :] >= num_visible[:, None]
         enc_out = self.transformer(padded_visible_patches, src_key_padding_mask=padding_mask)
         enc_out = self.norm(enc_out)
-        return enc_out, visible_patches_list
+        return enc_out
 
 # --------------------------------------------- #
 #   3️⃣  Decoder (Efficient Version)
@@ -119,13 +121,51 @@ class MAEDecoder(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, enc_out: torch.Tensor, mask: torch.BoolTensor):
+        """
+        enc_out: [B, L_vis_max, embed_dim]  (padded encoder outputs per sample)
+        mask:    [B, N]                    (True = masked, False = visible)
+        """
         B, N = mask.shape
-        visible_tokens = self.decoder_embed(enc_out)
-        unpadded_tokens_list = [visible_tokens[i, :mask.sum(dim=1)[i]] for i in range(B)]
-        flat_unpadded_tokens = torch.cat(unpadded_tokens_list, dim=0)
-        full_sequence = self.mask_token.to(visible_tokens.dtype).repeat(B, N, 1)
-        full_sequence[mask] = flat_unpadded_tokens
-        full_sequence = full_sequence + self.pos_embed.to(visible_tokens.dtype)
+        # embed encoder outputs to decoder dim
+        visible_tokens = self.decoder_embed(enc_out)  # [B, L_vis_max, D_dec]
+        D = visible_tokens.size(-1)
+        device = visible_tokens.device
+
+        # Prepare full sequence filled with mask_token
+        full_sequence = self.mask_token.expand(B, N, -1).clone()  # [B, N, D]
+
+        # --- Vectorized placement of visible tokens into full_sequence ---
+        # 1) figure out how many visible tokens per sample (num_visible)
+        num_visible = (~mask).sum(dim=1)           # [B]
+        max_vis = visible_tokens.size(1)           # padded length from encoder/transformer
+
+        # 2) build boolean selector for valid entries inside visible_tokens (per-sample)
+        arange_vis = torch.arange(max_vis, device=device)
+        keep_pos = arange_vis[None, :] < num_visible[:, None]  # [B, max_vis], True for valid positions
+
+        # 3) flatten the valid visible tokens in batch order
+        #    visible_tokens[keep_pos] -> concatenated tensor of shape [total_visible, D]
+        flat_visible = visible_tokens[keep_pos]  # [sum(num_visible), D]
+
+        # 4) now place them into full_sequence at positions where mask == False
+        full_flat = full_sequence.view(-1, D)    # [B*N, D]
+        mask_flat = mask.view(-1)                # [B*N], True=masked, False=visible
+
+        # Sanity check (optional, cheap): counts must match
+        expected = (~mask_flat).sum().item()
+        if flat_visible.size(0) != expected:
+            raise RuntimeError(f"Mismatch visible token counts: flat_visible {flat_visible.size(0)} vs expected {expected}")
+
+        # Vectorized scatter (fill visible positions with flat_visible in batch order)
+        full_flat[~mask_flat] = flat_visible
+
+        # reshape back
+        full_sequence = full_flat.view(B, N, D)
+
+        # add pos embedding (match dtype)
+        full_sequence = full_sequence + self.pos_embed.to(full_sequence.dtype)
+
+        # decode
         dec_out = self.decoder(full_sequence)
         dec_out = self.norm(dec_out)
         recon_flat = self.reconstruction_head(dec_out)
@@ -180,23 +220,21 @@ class MAE(nn.Module):
         N, C, H, W = imgs.shape
         assert H == W and H % p == 0
         h = w = H // p
-        x = imgs.reshape(shape=(N, C, h, p, w, p))
-        x = torch.einsum('nchpwq->nhwpqc', x)
-        x = x.reshape(shape=(N, h * w, C * p**2))
+        # unfold → (N, C, h, w, p, p)
+        x = imgs.unfold(2, p, p).unfold(3, p, p)
+        x = x.permute(0, 2, 3, 1, 4, 5).reshape(N, h * w, C * p * p)
         return x
 
     def random_masking(self, B: int, device: torch.device) -> torch.BoolTensor:
         """
-        Random binary mask – True = visible patch
+        Random binary mask – True = masked, False = keep
         """
-        return torch.rand(B, self.num_patches, device=device) < (1.0 - self.mask_ratio)
+        return torch.rand(B, self.num_patches, device=device) < self.mask_ratio
 
+    # --------------------------------------------- #
+    #   Loss (修正：只在 masked patch 上计算)
+    # --------------------------------------------- #
     def forward_loss(self, imgs, pred, mask):
-        """
-        imgs: [N, 3, H, W]
-        pred: [N, L, p*p*3]
-        mask: [N, L], 0 is keep, 1 is remove
-        """
         target = self.patchify(imgs)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -204,10 +242,12 @@ class MAE(nn.Module):
             target = (target - mean) / (var + 1.e-6)**.5
 
         loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+        loss = loss.mean(dim=-1)  # [N, L]
 
-        loss = (loss * (~mask)).sum() / (~mask).sum()  # mean loss on masked patches
+        # 只计算 masked 的 patch
+        loss = (loss * mask).sum() / mask.sum()
         return loss
+
 
     def forward(self, x: torch.Tensor):
         """
@@ -222,10 +262,11 @@ class MAE(nn.Module):
         mask    : [B, N], the mask used.
         """
         B = x.shape[0]
-        mask = self.random_masking(B, x.device) # [B, N]  True = visible
+        # mask = self.random_masking(B, x.device) # [B, N]  True = visible
+        mask = self.random_masking(B, x.device)  # [B, N]  True = masked, False = visible
         
         # Encode only visible patches
-        enc_out, _ = self.encoder(x, mask)
+        enc_out = self.encoder(x, mask)
         
         # Decode full sequence
         recon_patches_flat = self.decoder(enc_out, mask) # [B, N, P*P*3]
