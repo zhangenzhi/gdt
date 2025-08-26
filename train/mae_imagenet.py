@@ -287,10 +287,10 @@ def mae_imagenet_pretrain_single(args, config):
     model = MAE(
         img_size=args.img_size,
         patch_size=args.patch_size,
-        encoder_embed_dim=config['model']['encoder_embed_dim'],
+        encoder_dim=config['model']['encoder_embed_dim'],
         encoder_depth=config['model']['encoder_depth'],
         encoder_heads=config['model']['encoder_heads'],
-        decoder_embed_dim=config['model']['decoder_embed_dim'],
+        decoder_dim=config['model']['decoder_embed_dim'],
         decoder_depth=config['model']['decoder_depth'],
         decoder_heads=config['model']['decoder_heads'],
         mask_ratio=config['model']['mask_ratio']
