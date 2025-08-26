@@ -75,7 +75,8 @@ class MAEEncoder(nn.Module):
 
         # Select only the visible patches based on ids_keep
         x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
-
+        import pdb;pdb.set_trace()
+        
         # Prepend CLS token and its positional embedding
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_tokens = cls_token.expand(B, -1, -1)
