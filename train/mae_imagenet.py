@@ -45,63 +45,158 @@ def setup_ddp(rank, world_size):
     dist.init_process_group(backend='nccl', init_method='env://')
 
 
+# def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
+#     # Detach tensors, move to CPU, and cast to float32
+#     original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
+#     recon_patches = recon_patches.cpu().to(torch.float32).numpy()
+#     mask = mask.cpu().numpy() # Move mask to CPU as well
+    
+#     H, W, C = original_img.shape
+#     N = mask.shape[0]
+    
+#     # Create the masked image
+#     masked_img = original_img.copy()
+#     num_patches_w = W // patch_size
+    
+#     for i in range(N):
+#         # CORRECTED: Check for True (masked) patches
+#         if mask[i]:
+#             h_idx = i // num_patches_w
+#             w_idx = i % num_patches_w
+#             start_h, start_w = h_idx * patch_size, w_idx * patch_size
+#             masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # Black color
+            
+#     # Create the reconstructed image (fill in masked patches with reconstructed ones)
+#     reconstructed_img = original_img.copy()
+#     # Reshape reconstructed patches to (N, P, P, C)
+#     recon_patches_reshaped = recon_patches.reshape(N, patch_size, patch_size, C)
+    
+#     for i in range(N):
+#         # CORRECTED: Check for True (masked) patches
+#         if mask[i]:
+#             h_idx = i // num_patches_w
+#             w_idx = i % num_patches_w
+#             start_h, start_w = h_idx * patch_size, w_idx * patch_size
+#             reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i]
+            
+#     # Create the Matplotlib figure
+#     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+#     fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
+
+#     # Plot original image
+#     axes[0].imshow(np.clip(original_img, 0, 1))
+#     axes[0].set_title("Original")
+#     axes[0].axis('off')
+
+#     # Plot masked image
+#     axes[1].imshow(np.clip(masked_img, 0, 1))
+#     axes[1].set_title("Masked Input")
+#     axes[1].axis('off')
+
+#     # Plot reconstructed image
+#     axes[2].imshow(np.clip(reconstructed_img, 0, 1))
+#     axes[2].set_title("Reconstructed")
+#     axes[2].axis('off')
+
+#     os.makedirs(output_dir, exist_ok=True)
+#     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
+#     plt.close(fig) # Close the figure to free up memory
+
+from PIL import Image, ImageDraw, ImageFont
+
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
-    # Detach tensors, move to CPU, and cast to float32
-    original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
-    recon_patches = recon_patches.cpu().to(torch.float32).numpy()
-    mask = mask.cpu().numpy() # Move mask to CPU as well
+    """
+    Creates and saves a visualization of the original, masked, and reconstructed images using PIL.
+    """
+    # --- 1. Prepare Tensors ---
+    # Detach tensors, move to CPU, and convert to NumPy arrays
+    original_img_np = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
+    recon_patches_np = recon_patches.cpu().to(torch.float32).numpy()
+    mask_np = mask.cpu().numpy()
+
+    # Scale to 0-255 for image creation
+    original_img_np = np.clip(original_img_np * 255, 0, 255).astype(np.uint8)
     
-    H, W, C = original_img.shape
-    N = mask.shape[0]
-    
-    # Create the masked image
-    masked_img = original_img.copy()
+    H, W, C = original_img_np.shape
+    N = mask_np.shape[0]
     num_patches_w = W // patch_size
-    
+
+    # --- 2. Create Individual PIL Images ---
+
+    # Original Image
+    original_pil = Image.fromarray(original_img_np)
+
+    # Masked Image
+    masked_np = original_img_np.copy()
     for i in range(N):
-        # CORRECTED: Check for True (masked) patches
-        if mask[i]:
+        if mask_np[i]:  # If it's a masked patch
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
-            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # Black color
-            
-    # Create the reconstructed image (fill in masked patches with reconstructed ones)
-    reconstructed_img = original_img.copy()
-    # Reshape reconstructed patches to (N, P, P, C)
-    recon_patches_reshaped = recon_patches.reshape(N, patch_size, patch_size, C)
+            masked_np[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # Black color
+    masked_pil = Image.fromarray(masked_np)
+
+    # Reconstructed Image
+    # First, denormalize the reconstructed patches if they were normalized during loss calculation
+    # NOTE: This step assumes the model output is normalized. If your model outputs pixel values
+    # in the [0, 1] range, this denormalization is crucial. We'll get the mean and std
+    # from the original image patches for a more accurate visualization.
     
+    reconstructed_np = original_img_np.copy()
+    recon_patches_reshaped = recon_patches_np.reshape(N, patch_size, patch_size, C)
+
     for i in range(N):
-        # CORRECTED: Check for True (masked) patches
-        if mask[i]:
+        if mask_np[i]: # If it's a masked patch
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
-            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patches_reshaped[i]
             
-    # Create the Matplotlib figure
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
+            # Get the original patch to find its mean and std for denormalization
+            original_patch = original_img_np[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
+            mean = original_patch.mean(axis=(0, 1))
+            std = original_patch.std(axis=(0, 1))
+            
+            # Denormalize the reconstructed patch
+            recon_patch = recon_patches_reshaped[i]
+            denorm_patch = recon_patch * (std + 1e-6) + mean
+            
+            # Scale to 0-255 and place in the image
+            recon_patch_uint8 = np.clip(denorm_patch, 0, 255).astype(np.uint8)
+            reconstructed_np[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = recon_patch_uint8
+            
+    reconstructed_pil = Image.fromarray(reconstructed_np)
 
-    # Plot original image
-    axes[0].imshow(np.clip(original_img, 0, 1))
-    axes[0].set_title("Original")
-    axes[0].axis('off')
+    # --- 3. Combine Images and Add Title ---
+    
+    # Define layout properties
+    padding = 10
+    title_height = 40
+    total_width = (W * 3) + (padding * 2)
+    total_height = H + title_height + padding
 
-    # Plot masked image
-    axes[1].imshow(np.clip(masked_img, 0, 1))
-    axes[1].set_title("Masked Input")
-    axes[1].axis('off')
+    # Create a new blank image with a white background
+    dst = Image.new('RGB', (total_width, total_height), color='white')
 
-    # Plot reconstructed image
-    axes[2].imshow(np.clip(reconstructed_img, 0, 1))
-    axes[2].set_title("Reconstructed")
-    axes[2].axis('off')
+    # Paste the three images side-by-side
+    dst.paste(original_pil, (0, title_height))
+    dst.paste(masked_pil, (W + padding, title_height))
+    dst.paste(reconstructed_pil, (W * 2 + padding * 2, title_height))
 
+    # Add text
+    draw = ImageDraw.Draw(dst)
+    try:
+        # Use a truetype font if available
+        font = ImageFont.truetype("arial.ttf", 20)
+    except IOError:
+        # Otherwise, use the default font
+        font = ImageFont.load_default()
+        
+    title_text = f"Loss: {loss:.4f} | Step: {step}"
+    draw.text((padding, padding // 2), title_text, fill='black', font=font)
+
+    # --- 4. Save the Final Image ---
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
-    plt.close(fig) # Close the figure to free up memory
-
+    dst.save(os.path.join(output_dir, f"{prefix}_{step}.png"))
 
 def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device_id, args, start_epoch, is_ddp=False):
     """
