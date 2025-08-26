@@ -131,16 +131,17 @@ class MAEDecoder(nn.Module):
         x = self.decoder_embed(x)
         
         # Separate CLS token from patch tokens
-        cls_token = x[:, :1, :]
         patch_tokens = x[:, 1:, :]
 
         # Create a placeholder for the full sequence of patches, filled with mask tokens
         B = x.shape[0]
-        full_sequence = self.mask_token.repeat(B, self.num_patches, 1)
+        # CORRECTED: Ensure the placeholder has the same dtype as the source tokens
+        # to prevent a mismatch error during the scatter operation inside autocast.
+        full_sequence = self.mask_token.repeat(B, self.num_patches, 1).to(patch_tokens.dtype)
 
         # Use scatter to place the visible patch tokens back into their original positions
         # ids_restore is used to "un-shuffle" the sequence
-        ids_restore_expanded = ids_restore.unsqueeze(-1).expand(-1, -1, x.shape[-1])
+        ids_restore_expanded = ids_restore.unsqueeze(-1).expand(-1, -1, patch_tokens.shape[-1])
         full_sequence.scatter_(dim=1, index=ids_restore_expanded, src=patch_tokens)
         
         # Add positional embeddings to the full sequence of patches
