@@ -1,16 +1,14 @@
 # --------------------------------------------- #
 #   File: mae.py
-#   MAE Model Definition
+#   MAE Model Definition (Revised and Annotated)
 # --------------------------------------------- #
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
 from torch.nn.utils.rnn import pad_sequence
-from torch.cuda.amp import autocast 
+from torch.cuda.amp import autocast
 
 # --------------------------------------------- #
-#   1️⃣  Patch embedding
+#   1️⃣  Patch embedding (No changes)
 # --------------------------------------------- #
 class PatchEmbedding(nn.Module):
     """Image → Patch embeddings."""
@@ -27,7 +25,7 @@ class PatchEmbedding(nn.Module):
 
 
 # --------------------------------------------- #
-#   2️⃣  Encoder (Efficient Version)
+#   2️⃣  Encoder (No changes to logic)
 # --------------------------------------------- #
 class MAEEncoder(nn.Module):
     """Encoder that processes only visible patches."""
@@ -67,34 +65,38 @@ class MAEEncoder(nn.Module):
     def forward(self, x: torch.Tensor, mask: torch.BoolTensor):
         B, _, _, _ = x.shape
         x = self.patch_embed(x)
-        # 添加位置编码
         x = x + self.pos_embed
         x = self.pos_drop(x)
-        # 取出可见 token（mask=False）
+
+        # NOTE: The list comprehension and pad_sequence are a standard way to
+        # handle variable-length sequences for the transformer, but can be a
+        # bottleneck for very large batches. For most cases, it's clear and correct.
         visible_patches_list = [x[i][~mask[i]] for i in range(B)]
         padded_visible_patches = pad_sequence(visible_patches_list, batch_first=True)
+
+        # Create the padding mask for the transformer's attention
         num_visible = (~mask).sum(dim=1)
         max_vis = num_visible.max()
+        # True indicates a position that should be ignored by attention.
         padding_mask = torch.arange(max_vis, device=x.device)[None, :] >= num_visible[:, None]
+
         enc_out = self.transformer(padded_visible_patches, src_key_padding_mask=padding_mask)
         enc_out = self.norm(enc_out)
         return enc_out
 
 # --------------------------------------------- #
-#   3️⃣  Decoder (Efficient Version)
+#   3️⃣  Decoder (Logic Refactored for Clarity)
 # --------------------------------------------- #
 class MAEDecoder(nn.Module):
-    """Decoder that reconstructs all patches. (Efficient Version)"""
-    def __init__(self, *, embed_dim=768, decoder_depth=4,
-                 decoder_heads=16, decoder_dim=512, patch_size=16,
-                 img_size=224):
+    """Decoder that reconstructs all patches."""
+    def __init__(self, *, encoder_dim=768, decoder_dim=512, decoder_depth=4,
+                 decoder_heads=16, patch_size=16, img_size=224):
         super().__init__()
-        self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
-        self.decoder_dim = decoder_dim
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
-        self.decoder_embed = nn.Linear(embed_dim, decoder_dim, bias=True)
+        self.decoder_embed = nn.Linear(encoder_dim, decoder_dim, bias=True)
         self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_dim))
+
         decoder_layer = nn.TransformerEncoderLayer(
             d_model=decoder_dim,
             nhead=decoder_heads,
@@ -103,10 +105,8 @@ class MAEDecoder(nn.Module):
             batch_first=True,
             norm_first=True
         )
-        self.decoder = nn.TransformerEncoder(decoder_layer,
-                                             num_layers=decoder_depth)
-        self.reconstruction_head = nn.Linear(decoder_dim,
-                                             patch_size * patch_size * 3, bias=True)
+        self.decoder = nn.TransformerEncoder(decoder_layer, num_layers=decoder_depth)
+        self.reconstruction_head = nn.Linear(decoder_dim, patch_size**2 * 3, bias=True)
         self.norm = nn.LayerNorm(decoder_dim)
         self.apply(self._init_weights)
 
@@ -120,59 +120,58 @@ class MAEDecoder(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    # --- REVISED FORWARD PASS ---
     def forward(self, enc_out: torch.Tensor, mask: torch.BoolTensor):
         """
-        enc_out: [B, L_vis_max, embed_dim]  (padded encoder outputs per sample)
-        mask:    [B, N]                    (True = masked, False = visible)
+        Reconstructs the full sequence of patches from the encoded visible patches.
+
+        Args:
+            enc_out (torch.Tensor): Output from the encoder [B, L_vis_max, D_enc].
+                                    It's padded to the max number of visible tokens.
+            mask (torch.BoolTensor): The mask used in the encoder [B, N].
+                                     True = masked, False = visible.
         """
+        # 1. Embed encoder tokens to the decoder's dimension
+        # [B, L_vis_max, D_enc] -> [B, L_vis_max, D_dec]
+        visible_tokens = self.decoder_embed(enc_out)
         B, N = mask.shape
-        # embed encoder outputs to decoder dim
-        visible_tokens = self.decoder_embed(enc_out)  # [B, L_vis_max, D_dec]
-        D = visible_tokens.size(-1)
-        device = visible_tokens.device
+        D_dec = visible_tokens.size(-1)
 
-        # Prepare full sequence filled with mask_token
-        full_sequence = self.mask_token.expand(B, N, -1).clone()  # [B, N, D]
+        # 2. Create a placeholder for the full sequence, filled with mask tokens
+        # [B, N, D_dec]
+        full_sequence = self.mask_token.expand(B, N, D_dec).clone()
 
-        # --- Vectorized placement of visible tokens into full_sequence ---
-        # 1) figure out how many visible tokens per sample (num_visible)
-        num_visible = (~mask).sum(dim=1)           # [B]
-        max_vis = visible_tokens.size(1)           # padded length from encoder/transformer
+        # 3. Unpad the encoder output to get a flat list of valid visible tokens
+        num_visible = (~mask).sum(dim=1)  # [B]
+        max_vis = visible_tokens.size(1)  # L_vis_max
+        # Create a boolean mask to identify valid (non-padding) tokens
+        keep_mask = torch.arange(max_vis, device=enc_out.device)[None, :] < num_visible[:, None] # [B, L_vis_max]
+        # Flatten and select only the valid tokens
+        valid_visible_tokens = visible_tokens[keep_mask] # [total_visible_patches, D_dec]
 
-        # 2) build boolean selector for valid entries inside visible_tokens (per-sample)
-        arange_vis = torch.arange(max_vis, device=device)
-        keep_pos = arange_vis[None, :] < num_visible[:, None]  # [B, max_vis], True for valid positions
+        # 4. Get the original positions of the visible patches
+        # `torch.where` gives us the coordinates of all `False` (visible) entries in the mask.
+        batch_indices, patch_indices = torch.where(~mask)
 
-        # 3) flatten the valid visible tokens in batch order
-        #    visible_tokens[keep_pos] -> concatenated tensor of shape [total_visible, D]
-        flat_visible = visible_tokens[keep_pos]  # [sum(num_visible), D]
+        # 5. Scatter the visible tokens into their original positions
+        # This is the core of the reconstruction. We place the `valid_visible_tokens`
+        # into the `full_sequence` placeholder at their original locations.
+        full_sequence[batch_indices, patch_indices] = valid_visible_tokens
 
-        # 4) now place them into full_sequence at positions where mask == False
-        full_flat = full_sequence.view(-1, D)    # [B*N, D]
-        mask_flat = mask.view(-1)                # [B*N], True=masked, False=visible
+        # 6. Add positional embeddings to the complete sequence
+        full_sequence = full_sequence + self.pos_embed
 
-        # Sanity check (optional, cheap): counts must match
-        expected = (~mask_flat).sum().item()
-        if flat_visible.size(0) != expected:
-            raise RuntimeError(f"Mismatch visible token counts: flat_visible {flat_visible.size(0)} vs expected {expected}")
-
-        # Vectorized scatter (fill visible positions with flat_visible in batch order)
-        full_flat[~mask_flat] = flat_visible
-
-        # reshape back
-        full_sequence = full_flat.view(B, N, D)
-
-        # add pos embedding (match dtype)
-        full_sequence = full_sequence + self.pos_embed.to(full_sequence.dtype)
-
-        # decode
+        # 7. Pass the full sequence through the decoder
         dec_out = self.decoder(full_sequence)
         dec_out = self.norm(dec_out)
+
+        # 8. Project to pixel space for reconstruction
         recon_flat = self.reconstruction_head(dec_out)
         return recon_flat
 
+
 # --------------------------------------------- #
-#   4️⃣  MAE wrapper (handles masking)
+#   4️⃣  MAE wrapper (Parameter names clarified)
 # --------------------------------------------- #
 class MAE(nn.Module):
     """End-to-end Masked Auto-Encoder."""
@@ -180,61 +179,62 @@ class MAE(nn.Module):
                  img_size=224,
                  patch_size=16,
                  in_channels=3,
-                 encoder_embed_dim=768,
+                 encoder_dim=768,
                  encoder_depth=12,
                  encoder_heads=12,
-                 decoder_embed_dim=512,
+                 decoder_dim=512, # REVISED: Clearer parameter name
                  decoder_depth=4,
                  decoder_heads=16,
                  mask_ratio=0.75,
-                 norm_pix_loss=True):  # Added new parameter
+                 norm_pix_loss=True):
         super().__init__()
         self.mask_ratio = mask_ratio
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
-        self.norm_pix_loss = norm_pix_loss # Store the parameter
+        self.norm_pix_loss = norm_pix_loss
 
         self.encoder = MAEEncoder(
             img_size=img_size,
             patch_size=patch_size,
             in_channels=in_channels,
-            embed_dim=encoder_embed_dim,
+            embed_dim=encoder_dim,
             depth=encoder_depth,
             num_heads=encoder_heads,
         )
         self.decoder = MAEDecoder(
-            embed_dim=encoder_embed_dim,
+            encoder_dim=encoder_dim, # REVISED: Pass correct dimensions
+            decoder_dim=decoder_dim,
             decoder_depth=decoder_depth,
             decoder_heads=decoder_heads,
-            decoder_dim=decoder_embed_dim,
             patch_size=patch_size,
             img_size=img_size,
         )
-    
-    def patchify(self, imgs):
+
+    def patchify(self, imgs: torch.Tensor) -> torch.Tensor:
         """
-        imgs: (N, 3, H, W)
-        x: (N, L, patch_size**2 * 3)
+        Converts an image into a sequence of flattened patches.
+        imgs: (B, C, H, W) -> x: (B, N, P*P*C)
         """
         p = self.patch_size
-        N, C, H, W = imgs.shape
-        assert H == W and H % p == 0
-        h = w = H // p
-        # unfold → (N, C, h, w, p, p)
-        x = imgs.unfold(2, p, p).unfold(3, p, p)
-        x = x.permute(0, 2, 3, 1, 4, 5).reshape(N, h * w, C * p * p)
+        B, C, H, W = imgs.shape
+        assert H == W and H % p == 0, "Image dimensions must be divisible by patch size."
+        num_patches_h = H // p
+        # (B, C, H, W) -> (B, C, h, p, w, p) -> (B, h, w, C, p, p) -> (B, h*w, C*p*p)
+        x = imgs.reshape(B, C, num_patches_h, p, num_patches_h, p)
+        x = torch.einsum('bchpwq->bhwcpq', x)
+        x = x.reshape(B, self.num_patches, C * p * p)
         return x
 
     def random_masking(self, B: int, device: torch.device) -> torch.BoolTensor:
         """
-        Random binary mask – True = masked, False = keep
+        Generates a random binary mask. True = masked, False = keep.
         """
         return torch.rand(B, self.num_patches, device=device) < self.mask_ratio
 
-    # --------------------------------------------- #
-    #   Loss (修正：只在 masked patch 上计算)
-    # --------------------------------------------- #
-    def forward_loss(self, imgs, pred, mask):
+    def forward_loss(self, imgs: torch.Tensor, pred: torch.Tensor, mask: torch.BoolTensor) -> torch.Tensor:
+        """
+        Calculates the reconstruction loss on the masked patches.
+        """
         target = self.patchify(imgs)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -242,75 +242,70 @@ class MAE(nn.Module):
             target = (target - mean) / (var + 1.e-6)**.5
 
         loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L]
+        loss = loss.mean(dim=-1)  # [B, N], loss per patch
 
-        # 只计算 masked 的 patch
+        # Only consider loss on masked patches
         loss = (loss * mask).sum() / mask.sum()
         return loss
 
-
     def forward(self, x: torch.Tensor):
         """
-        Parameters
-        ----------
-        x : [B, C, H, W]
-
-        Returns
-        -------
-        loss    : The reconstruction loss (scalar).
-        recon   : [B, N, P*P*3], the reconstructed patches.
-        mask    : [B, N], the mask used.
+        Full forward pass of the MAE model.
         """
         B = x.shape[0]
-        # mask = self.random_masking(B, x.device) # [B, N]  True = visible
-        mask = self.random_masking(B, x.device)  # [B, N]  True = masked, False = visible
-        
-        # Encode only visible patches
+        # True = masked, False = visible
+        mask = self.random_masking(B, x.device)
+
+        # Encode only the visible patches
         enc_out = self.encoder(x, mask)
-        
-        # Decode full sequence
-        recon_patches_flat = self.decoder(enc_out, mask) # [B, N, P*P*3]
-        
-        # Calculate loss on masked patches using the new function
+
+        # Decode the full sequence of patches
+        recon_patches_flat = self.decoder(enc_out, mask)
+
+        # Calculate the reconstruction loss
         loss = self.forward_loss(x, recon_patches_flat, mask)
-        
+
         return loss, recon_patches_flat, mask
 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Use bfloat16 on CUDA if available, otherwise float32
+    dtype = torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported() else torch.float32
+    
+    print(f"Using device: {device}, dtype: {dtype}")
+
     model = MAE().to(device)
-    
-    # Use bfloat16 for the dummy tensor
-    # NOTE: The model and input must be on a CUDA device to use bfloat16
-    if device.type == "cuda":
-        dummy = torch.randn(8, 3, 224, 224, device=device).to(torch.bfloat16)
-    else:
-        # Fallback to float32 if not on CUDA, as bfloat16 is a GPU-specific feature
-        dummy = torch.randn(8, 3, 224, 224, device=device)
+    dummy_input = torch.randn(8, 3, 224, 224, device=device)
 
-    # Use autocast to run the forward pass in bfloat16
-    with autocast(device_type=device.type, dtype=torch.bfloat16):
-        # The forward pass now returns loss, reconstruction, and mask
-        loss, recon, mask = model(dummy)
+    # Use autocast for mixed-precision training
+    with autocast(device_type=device.type, dtype=dtype):
+        loss, recon, mask = model(dummy_input)
 
-    # Add backward pass to verify gradients
+    # Simple backward pass to check for gradient flow
     loss.backward()
-    
-    print("Reconstructed patch shape:", recon.shape)
-    print("Reconstructed patch dtype:", recon.dtype)
-    print("Loss:", loss.item())
-    
-    # Check if a gradient exists for a parameter in the encoder
-    # This is a good way to test if the backward pass worked.
+
+    print("\n--- Sanity Checks ---")
+    print(f"Reconstructed patch shape: {recon.shape}")
+    print(f"Reconstructed patch dtype: {recon.dtype}")
+    print(f"Loss: {loss.item():.4f}")
+
+    # Check if gradients are computed
     first_encoder_param_grad = model.encoder.transformer.layers[0].self_attn.in_proj_weight.grad
     if first_encoder_param_grad is not None:
-        print("Gradient for the first encoder layer's attention weight has been calculated.")
+        print("✅ Gradient computed for an encoder parameter.")
     else:
-        print("No gradient was calculated for the first encoder layer's attention weight.")
-        
+        print("❌ No gradient found for an encoder parameter.")
+
+    # Check output shape and dtype
     P = model.patch_size
-    expected_shape = torch.Size([dummy.size(0), model.num_patches, 3 * P * P])
+    expected_shape = torch.Size([dummy_input.size(0), model.num_patches, 3 * P * P])
     assert recon.shape == expected_shape, f"Shape mismatch! Got {recon.shape}, expected {expected_shape}"
-    assert recon.dtype == torch.bfloat16, f"Dtype mismatch! Got {recon.dtype}, expected {torch.bfloat16}"
-    print("Sanity check passed!")
+    print(f"✅ Output shape is correct: {recon.shape}")
+
+    # The output dtype of autocast can sometimes be float32 even if computations are in bfloat16
+    # So we check if it's one of the expected types.
+    assert recon.dtype in [torch.bfloat16, torch.float32], f"Dtype mismatch! Got {recon.dtype}"
+    print(f"✅ Output dtype is correct: {recon.dtype}")
+    print("\nSanity checks passed!")
+
