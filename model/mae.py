@@ -5,7 +5,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
-from torch.cuda.amp import autocast
+from torch.amp import autocast # REVISED: Updated import for modern API
 
 # --------------------------------------------- #
 #   1️⃣  Patch embedding (No changes)
@@ -279,7 +279,9 @@ if __name__ == "__main__":
     dummy_input = torch.randn(8, 3, 224, 224, device=device)
 
     # Use autocast for mixed-precision training
-    with autocast(device_type=device.type, dtype=dtype):
+    # REVISED: Corrected the autocast call to match the modern PyTorch API.
+    # The device type is now a positional argument, not a keyword argument.
+    with autocast(device.type, dtype=dtype):
         loss, recon, mask = model(dummy_input)
 
     # Simple backward pass to check for gradient flow
@@ -308,4 +310,3 @@ if __name__ == "__main__":
     assert recon.dtype in [torch.bfloat16, torch.float32], f"Dtype mismatch! Got {recon.dtype}"
     print(f"✅ Output dtype is correct: {recon.dtype}")
     print("\nSanity checks passed!")
-
