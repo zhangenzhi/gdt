@@ -199,6 +199,8 @@ class MAE(nn.Module):
 
     # REVISED: Fixed-ratio masking using randperm
     def random_masking(self, x: torch.Tensor):
+        import pdb;pdb.set_trace()
+        
         B, N, D = x.shape
         len_keep = int(N * (1 - self.mask_ratio))
 
