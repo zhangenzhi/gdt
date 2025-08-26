@@ -39,7 +39,7 @@ class MAEEncoder(nn.Module):
         # REVISED: Add CLS token and update positional embedding
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
-        self.pos_drop = nn.Dropout(pdropout)
+        self.pos_drop = nn.Dropout(dropout)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
