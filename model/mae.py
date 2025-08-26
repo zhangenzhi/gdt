@@ -281,7 +281,7 @@ if __name__ == "__main__":
         print("❌ No gradient found for an encoder parameter.")
 
     P = model.patch_size
-    expected_shape = torch.Size([dummy_input.size(0), self.num_patches, 3 * P * P])
+    expected_shape = torch.Size([dummy_input.size(0), model.num_patches, 3 * P * P])
     assert recon.shape == expected_shape, f"Shape mismatch! Got {recon.shape}, expected {expected_shape}"
     print(f"✅ Output shape is correct: {recon.shape}")
 
