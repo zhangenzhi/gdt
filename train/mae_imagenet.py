@@ -45,9 +45,6 @@ def setup_ddp(rank, world_size):
     dist.init_process_group(backend='nccl', init_method='env://')
 
 
-# --------------------------------------------- #
-#   图像可视化和保存函数 (Image Visualization and Saving)
-# --------------------------------------------- #
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
     """
     Saves a single Matplotlib figure with the original, masked, and reconstructed images.
@@ -115,9 +112,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
     plt.close(fig) # Close the figure to free up memory
 
-# --------------------------------------------- #
-#   MAE 预训练核心逻辑 (MAE Pre-training Core Logic)
-# --------------------------------------------- #
+
 def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device_id, args, start_epoch, is_ddp=False):
     """
     MAE pre-training loop.
@@ -164,7 +159,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
             running_loss += loss.item() * accumulation_steps
             
             # Save images every 1000 steps on the main process
-            if (i + 1) % 1000 == 0 and is_main_process:
+            if (i + 1) % 500 == 0 and is_main_process:
                 with torch.no_grad():
                     # MAE model returns un-normalized patches
                     loss_val, recon, mask_val = model(images)
