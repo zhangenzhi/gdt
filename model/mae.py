@@ -235,6 +235,8 @@ class MAE(nn.Module):
 
     # REVISED: Main forward pass uses index-based logic
     def forward(self, x: torch.Tensor):
+        import pdb;pdb.set_trace()
+        
         # Generate fixed-ratio mask and corresponding indices
         ids_keep, mask, ids_restore = self.random_masking(
             torch.zeros(x.shape[0], self.num_patches, 1, device=x.device)
