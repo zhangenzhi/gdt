@@ -46,22 +46,10 @@ def setup_ddp(rank, world_size):
 
 
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
-    """
-    Saves a single Matplotlib figure with the original, masked, and reconstructed images.
-    
-    Args:
-        original_img (Tensor): [C, H, W]
-        mask (Tensor): [N]
-        recon_patches (Tensor): [N, C*P*P]
-        patch_size (int)
-        loss (float)
-        step (int)
-        output_dir (str)
-        prefix (str)
-    """
     # Detach tensors, move to CPU, and cast to float32
     original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
     recon_patches = recon_patches.cpu().to(torch.float32).numpy()
+    mask = mask.cpu().numpy() # Move mask to CPU as well
     
     H, W, C = original_img.shape
     N = mask.shape[0]
@@ -69,10 +57,10 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     # Create the masked image
     masked_img = original_img.copy()
     num_patches_w = W // patch_size
-    num_patches_h = H // patch_size
     
     for i in range(N):
-        if not mask[i]:  # If it's a masked patch
+        # CORRECTED: Check for True (masked) patches
+        if mask[i]:
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
@@ -80,10 +68,12 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             
     # Create the reconstructed image (fill in masked patches with reconstructed ones)
     reconstructed_img = original_img.copy()
-    recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size).transpose(0, 2, 3, 1) # N, P, P, C
+    # Reshape reconstructed patches to (N, P, P, C)
+    recon_patches_reshaped = recon_patches.reshape(N, patch_size, patch_size, C)
     
     for i in range(N):
-        if not mask[i]:  # If it's a masked patch
+        # CORRECTED: Check for True (masked) patches
+        if mask[i]:
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
