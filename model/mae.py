@@ -173,7 +173,7 @@ class MAE(nn.Module):
                  decoder_depth=4,
                  decoder_heads=16,
                  mask_ratio=0.75,
-                 norm_pix_loss=True):
+                 norm_pix_loss=False):
         super().__init__()
         self.mask_ratio = mask_ratio
         self.patch_size = patch_size
