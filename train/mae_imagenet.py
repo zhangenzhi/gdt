@@ -71,8 +71,10 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
 
     # --- 3. 创建重建的图像 (添加了反归一化) ---
     reconstructed_img = original_img.copy()
-    # 将重建的图像块从 (N, P*P*C) 重塑为 (N, P, P, C)
-    recon_patches_reshaped = recon_patches.reshape(N, patch_size, patch_size, C)
+    
+    # --- 关键修改：修正 Reshape 的逻辑 ---
+    # 1. 首先按照模型的平面输出格式 (C, P, P) 来重塑
+    recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size)
     
     for i in range(N):
         if mask[i]:  # 只处理被遮蔽的图像块
@@ -80,18 +82,18 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             
-            # --- 关键修改：反归一化 ---
-            # 1. 获取原始图像块，以计算其均值和标准差
+            # 2. 将单个图像块从 (C, P, P) 转置为 (P, P, C) 以便后续处理
+            recon_patch_chw = recon_patches_reshaped[i]
+            recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
+            
+            # --- 反归一化 ---
             original_patch = original_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
             mean = original_patch.mean(axis=(0, 1))
             std = original_patch.std(axis=(0, 1))
             
-            # 2. 使用均值和标准差来反归一化重建的图像块
-            recon_patch = recon_patches_reshaped[i]
-            denorm_patch = recon_patch * (std + 1e-6) + mean
+            denorm_patch = recon_patch_hwc * (std + 1e-6) + mean
             
-            # 3. 将反归一化后的图像块放回图片中
-            #    使用 np.clip 确保像素值在 [0, 1] 的有效范围内
+            # 将反归一化后的图像块放回图片中
             reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
             
     # --- 4. 绘制并保存图像 ---
