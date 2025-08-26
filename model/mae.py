@@ -139,7 +139,9 @@ class MAEDecoder(nn.Module):
 
         # 2. Create a placeholder for the full sequence, filled with mask tokens
         # [B, N, D_dec]
-        full_sequence = self.mask_token.expand(B, N, D_dec).clone()
+        # REVISED: Ensure the placeholder has the same dtype as the visible tokens
+        # to prevent a mismatch error during the index_put operation inside autocast.
+        full_sequence = self.mask_token.expand(B, N, D_dec).clone().to(visible_tokens.dtype)
 
         # 3. Unpad the encoder output to get a flat list of valid visible tokens
         num_visible = (~mask).sum(dim=1)  # [B]
