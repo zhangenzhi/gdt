@@ -4,8 +4,7 @@
 # --------------------------------------------- #
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pad_sequence
-from torch.amp import autocast # REVISED: Updated import for modern API
+from torch.amp import autocast
 
 # --------------------------------------------- #
 #   1️⃣  Patch embedding (No changes)
@@ -25,10 +24,10 @@ class PatchEmbedding(nn.Module):
 
 
 # --------------------------------------------- #
-#   2️⃣  Encoder (No changes to logic)
+#   2️⃣  Encoder (Refactored with CLS token)
 # --------------------------------------------- #
 class MAEEncoder(nn.Module):
-    """Encoder that processes only visible patches."""
+    """Encoder that processes only visible patches with a CLS token."""
     def __init__(self, *, img_size=224, patch_size=16, in_channels=3,
                  embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0,
                  dropout=0.1):
@@ -36,7 +35,10 @@ class MAEEncoder(nn.Module):
         self.patch_embed = PatchEmbedding(img_size, patch_size,
                                           in_channels, embed_dim)
         num_patches = self.patch_embed.num_patches
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+        
+        # REVISED: Add CLS token and update positional embedding
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.pos_drop = nn.Dropout(p=dropout)
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -62,40 +64,42 @@ class MAEEncoder(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x: torch.Tensor, mask: torch.BoolTensor):
-        B, _, _, _ = x.shape
+    # REVISED: Forward pass simplified to work with pre-selected tokens
+    def forward(self, x: torch.Tensor, ids_keep: torch.Tensor):
+        B, _, _ = x.shape
+
+        # Patchify and add positional embeddings
         x = self.patch_embed(x)
-        x = x + self.pos_embed
+        x = x + self.pos_embed[:, 1:, :] # Add pos embed to patches
+
+        # Select only the visible patches based on ids_keep
+        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
+
+        # Prepend CLS token and its positional embedding
+        cls_token = self.cls_token + self.pos_embed[:, :1, :]
+        cls_tokens = cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        
         x = self.pos_drop(x)
-
-        # NOTE: The list comprehension and pad_sequence are a standard way to
-        # handle variable-length sequences for the transformer, but can be a
-        # bottleneck for very large batches. For most cases, it's clear and correct.
-        visible_patches_list = [x[i][~mask[i]] for i in range(B)]
-        padded_visible_patches = pad_sequence(visible_patches_list, batch_first=True)
-
-        # Create the padding mask for the transformer's attention
-        num_visible = (~mask).sum(dim=1)
-        max_vis = num_visible.max()
-        # True indicates a position that should be ignored by attention.
-        padding_mask = torch.arange(max_vis, device=x.device)[None, :] >= num_visible[:, None]
-
-        enc_out = self.transformer(padded_visible_patches, src_key_padding_mask=padding_mask)
+        
+        # Pass through transformer encoder
+        # No padding mask needed as all sequences are of the same length
+        enc_out = self.transformer(x)
         enc_out = self.norm(enc_out)
         return enc_out
 
 # --------------------------------------------- #
-#   3️⃣  Decoder (Logic Refactored for Clarity)
+#   3️⃣  Decoder (Refactored for index-based scatter)
 # --------------------------------------------- #
 class MAEDecoder(nn.Module):
-    """Decoder that reconstructs all patches."""
+    """Decoder that reconstructs all patches using an index-based scatter."""
     def __init__(self, *, encoder_dim=768, decoder_dim=512, decoder_depth=4,
                  decoder_heads=16, patch_size=16, img_size=224):
         super().__init__()
         self.num_patches = (img_size // patch_size) ** 2
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
         self.decoder_embed = nn.Linear(encoder_dim, decoder_dim, bias=True)
-        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches + 1, decoder_dim))
 
         decoder_layer = nn.TransformerEncoderLayer(
             d_model=decoder_dim,
@@ -120,60 +124,38 @@ class MAEDecoder(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    # --- REVISED FORWARD PASS ---
-    def forward(self, enc_out: torch.Tensor, mask: torch.BoolTensor):
-        """
-        Reconstructs the full sequence of patches from the encoded visible patches.
+    # REVISED: Forward pass uses indices to reconstruct the full sequence
+    def forward(self, x: torch.Tensor, ids_restore: torch.Tensor):
+        # Embed encoder tokens to the decoder's dimension
+        x = self.decoder_embed(x)
+        
+        # Separate CLS token from patch tokens
+        cls_token = x[:, :1, :]
+        patch_tokens = x[:, 1:, :]
 
-        Args:
-            enc_out (torch.Tensor): Output from the encoder [B, L_vis_max, D_enc].
-                                    It's padded to the max number of visible tokens.
-            mask (torch.BoolTensor): The mask used in the encoder [B, N].
-                                     True = masked, False = visible.
-        """
-        # 1. Embed encoder tokens to the decoder's dimension
-        # [B, L_vis_max, D_enc] -> [B, L_vis_max, D_dec]
-        visible_tokens = self.decoder_embed(enc_out)
-        B, N = mask.shape
-        D_dec = visible_tokens.size(-1)
+        # Create a placeholder for the full sequence of patches, filled with mask tokens
+        B = x.shape[0]
+        full_sequence = self.mask_token.repeat(B, self.num_patches, 1)
 
-        # 2. Create a placeholder for the full sequence, filled with mask tokens
-        # [B, N, D_dec]
-        # REVISED: Ensure the placeholder has the same dtype as the visible tokens
-        # to prevent a mismatch error during the index_put operation inside autocast.
-        full_sequence = self.mask_token.expand(B, N, D_dec).clone().to(visible_tokens.dtype)
+        # Use scatter to place the visible patch tokens back into their original positions
+        # ids_restore is used to "un-shuffle" the sequence
+        ids_restore_expanded = ids_restore.unsqueeze(-1).expand(-1, -1, x.shape[-1])
+        full_sequence.scatter_(dim=1, index=ids_restore_expanded, src=patch_tokens)
+        
+        # Add positional embeddings to the full sequence of patches
+        full_sequence = full_sequence + self.pos_embed[:, 1:, :]
 
-        # 3. Unpad the encoder output to get a flat list of valid visible tokens
-        num_visible = (~mask).sum(dim=1)  # [B]
-        max_vis = visible_tokens.size(1)  # L_vis_max
-        # Create a boolean mask to identify valid (non-padding) tokens
-        keep_mask = torch.arange(max_vis, device=enc_out.device)[None, :] < num_visible[:, None] # [B, L_vis_max]
-        # Flatten and select only the valid tokens
-        valid_visible_tokens = visible_tokens[keep_mask] # [total_visible_patches, D_dec]
-
-        # 4. Get the original positions of the visible patches
-        # `torch.where` gives us the coordinates of all `False` (visible) entries in the mask.
-        batch_indices, patch_indices = torch.where(~mask)
-
-        # 5. Scatter the visible tokens into their original positions
-        # This is the core of the reconstruction. We place the `valid_visible_tokens`
-        # into the `full_sequence` placeholder at their original locations.
-        full_sequence[batch_indices, patch_indices] = valid_visible_tokens
-
-        # 6. Add positional embeddings to the complete sequence
-        full_sequence = full_sequence + self.pos_embed
-
-        # 7. Pass the full sequence through the decoder
+        # Pass the full sequence through the decoder
         dec_out = self.decoder(full_sequence)
         dec_out = self.norm(dec_out)
 
-        # 8. Project to pixel space for reconstruction
+        # Project to pixel space for reconstruction
         recon_flat = self.reconstruction_head(dec_out)
         return recon_flat
 
 
 # --------------------------------------------- #
-#   4️⃣  MAE wrapper (Parameter names clarified)
+#   4️⃣  MAE wrapper (Refactored masking and data flow)
 # --------------------------------------------- #
 class MAE(nn.Module):
     """End-to-end Masked Auto-Encoder."""
@@ -184,7 +166,7 @@ class MAE(nn.Module):
                  encoder_dim=768,
                  encoder_depth=12,
                  encoder_heads=12,
-                 decoder_dim=512, # REVISED: Clearer parameter name
+                 decoder_dim=512,
                  decoder_depth=4,
                  decoder_heads=16,
                  mask_ratio=0.75,
@@ -196,47 +178,48 @@ class MAE(nn.Module):
         self.norm_pix_loss = norm_pix_loss
 
         self.encoder = MAEEncoder(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_channels=in_channels,
-            embed_dim=encoder_dim,
-            depth=encoder_depth,
-            num_heads=encoder_heads,
+            img_size=img_size, patch_size=patch_size, in_channels=in_channels,
+            embed_dim=encoder_dim, depth=encoder_depth, num_heads=encoder_heads,
         )
         self.decoder = MAEDecoder(
-            encoder_dim=encoder_dim, # REVISED: Pass correct dimensions
-            decoder_dim=decoder_dim,
-            decoder_depth=decoder_depth,
-            decoder_heads=decoder_heads,
-            patch_size=patch_size,
-            img_size=img_size,
+            encoder_dim=encoder_dim, decoder_dim=decoder_dim,
+            decoder_depth=decoder_depth, decoder_heads=decoder_heads,
+            patch_size=patch_size, img_size=img_size,
         )
 
     def patchify(self, imgs: torch.Tensor) -> torch.Tensor:
-        """
-        Converts an image into a sequence of flattened patches.
-        imgs: (B, C, H, W) -> x: (B, N, P*P*C)
-        """
         p = self.patch_size
         B, C, H, W = imgs.shape
         assert H == W and H % p == 0, "Image dimensions must be divisible by patch size."
         num_patches_h = H // p
-        # (B, C, H, W) -> (B, C, h, p, w, p) -> (B, h, w, C, p, p) -> (B, h*w, C*p*p)
         x = imgs.reshape(B, C, num_patches_h, p, num_patches_h, p)
         x = torch.einsum('bchpwq->bhwcpq', x)
         x = x.reshape(B, self.num_patches, C * p * p)
         return x
 
-    def random_masking(self, B: int, device: torch.device) -> torch.BoolTensor:
-        """
-        Generates a random binary mask. True = masked, False = keep.
-        """
-        return torch.rand(B, self.num_patches, device=device) < self.mask_ratio
+    # REVISED: Fixed-ratio masking using randperm
+    def random_masking(self, x: torch.Tensor):
+        B, N, D = x.shape
+        len_keep = int(N * (1 - self.mask_ratio))
+
+        # Generate noise for shuffling
+        noise = torch.rand(B, N, device=x.device)
+        
+        # Sort noise and keep the top `len_keep` indices
+        ids_shuffle = torch.argsort(noise, dim=1)
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        ids_keep = ids_shuffle[:, :len_keep]
+        
+        # Generate the boolean mask (True for masked)
+        mask = torch.ones([B, N], device=x.device)
+        mask[:, :len_keep] = 0
+        # Un-shuffle the mask to its original order
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return ids_keep, mask.bool(), ids_restore
 
     def forward_loss(self, imgs: torch.Tensor, pred: torch.Tensor, mask: torch.BoolTensor) -> torch.Tensor:
-        """
-        Calculates the reconstruction loss on the masked patches.
-        """
         target = self.patchify(imgs)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -244,25 +227,23 @@ class MAE(nn.Module):
             target = (target - mean) / (var + 1.e-6)**.5
 
         loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [B, N], loss per patch
-
-        # Only consider loss on masked patches
+        loss = loss.mean(dim=-1)
         loss = (loss * mask).sum() / mask.sum()
         return loss
 
+    # REVISED: Main forward pass uses index-based logic
     def forward(self, x: torch.Tensor):
-        """
-        Full forward pass of the MAE model.
-        """
-        B = x.shape[0]
-        # True = masked, False = visible
-        mask = self.random_masking(B, x.device)
-
+        # Generate fixed-ratio mask and corresponding indices
+        # We patchify the image inside the encoder now
+        _, ids_keep, mask, ids_restore = self.random_masking(
+            torch.zeros(x.shape[0], self.num_patches, 1, device=x.device)
+        )
+        
         # Encode only the visible patches
-        enc_out = self.encoder(x, mask)
+        enc_out = self.encoder(x, ids_keep)
 
         # Decode the full sequence of patches
-        recon_patches_flat = self.decoder(enc_out, mask)
+        recon_patches_flat = self.decoder(enc_out, ids_restore)
 
         # Calculate the reconstruction loss
         loss = self.forward_loss(x, recon_patches_flat, mask)
@@ -272,7 +253,6 @@ class MAE(nn.Module):
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Use bfloat16 on CUDA if available, otherwise float32
     dtype = torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported() else torch.float32
     
     print(f"Using device: {device}, dtype: {dtype}")
@@ -280,35 +260,30 @@ if __name__ == "__main__":
     model = MAE().to(device)
     dummy_input = torch.randn(8, 3, 224, 224, device=device)
 
-    # Use autocast for mixed-precision training
-    # REVISED: Corrected the autocast call to match the modern PyTorch API.
-    # The device type is now a positional argument, not a keyword argument.
     with autocast(device.type, dtype=dtype):
         loss, recon, mask = model(dummy_input)
 
-    # Simple backward pass to check for gradient flow
     loss.backward()
 
     print("\n--- Sanity Checks ---")
     print(f"Reconstructed patch shape: {recon.shape}")
     print(f"Reconstructed patch dtype: {recon.dtype}")
     print(f"Loss: {loss.item():.4f}")
+    print(f"Number of masked patches: {mask.sum().item()}")
+    print(f"Expected number of masked patches: {int(model.num_patches * model.mask_ratio) * dummy_input.shape[0]}")
 
-    # Check if gradients are computed
+
     first_encoder_param_grad = model.encoder.transformer.layers[0].self_attn.in_proj_weight.grad
     if first_encoder_param_grad is not None:
         print("✅ Gradient computed for an encoder parameter.")
     else:
         print("❌ No gradient found for an encoder parameter.")
 
-    # Check output shape and dtype
     P = model.patch_size
     expected_shape = torch.Size([dummy_input.size(0), model.num_patches, 3 * P * P])
     assert recon.shape == expected_shape, f"Shape mismatch! Got {recon.shape}, expected {expected_shape}"
     print(f"✅ Output shape is correct: {recon.shape}")
 
-    # The output dtype of autocast can sometimes be float32 even if computations are in bfloat16
-    # So we check if it's one of the expected types.
     assert recon.dtype in [torch.bfloat16, torch.float32], f"Dtype mismatch! Got {recon.dtype}"
     print(f"✅ Output dtype is correct: {recon.dtype}")
     print("\nSanity checks passed!")
