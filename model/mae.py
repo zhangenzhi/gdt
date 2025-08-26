@@ -236,7 +236,8 @@ class MAE(nn.Module):
     def forward(self, x: torch.Tensor):
         # Generate fixed-ratio mask and corresponding indices
         # We patchify the image inside the encoder now
-        _, ids_keep, mask, ids_restore = self.random_masking(
+        # CORRECTED: Unpacking now matches the 3 return values from random_masking
+        ids_keep, mask, ids_restore = self.random_masking(
             torch.zeros(x.shape[0], self.num_patches, 1, device=x.device)
         )
         
