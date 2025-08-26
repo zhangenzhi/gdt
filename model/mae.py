@@ -66,6 +66,7 @@ class MAEEncoder(nn.Module):
 
     # REVISED: Forward pass simplified to work with pre-selected tokens
     def forward(self, x: torch.Tensor, ids_keep: torch.Tensor):
+        import pdb;pdb.set_trace()
         B, _, _ = x.shape
 
         # Patchify and add positional embeddings
@@ -199,7 +200,6 @@ class MAE(nn.Module):
 
     # REVISED: Fixed-ratio masking using randperm
     def random_masking(self, x: torch.Tensor):
-        import pdb;pdb.set_trace()
         
         B, N, D = x.shape
         len_keep = int(N * (1 - self.mask_ratio))
