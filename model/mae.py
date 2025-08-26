@@ -75,7 +75,7 @@ class MAEEncoder(nn.Module):
 
         # Select only the visible patches based on ids_keep
         x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         
         # Prepend CLS token and its positional embedding
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -236,7 +236,7 @@ class MAE(nn.Module):
 
     # REVISED: Main forward pass uses index-based logic
     def forward(self, x: torch.Tensor):
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         
         # Generate fixed-ratio mask and corresponding indices
         ids_keep, mask, ids_restore = self.random_masking(
