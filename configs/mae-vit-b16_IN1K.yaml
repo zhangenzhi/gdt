@@ -4,7 +4,7 @@ task_name: "mae_imagenet_pretrain"
 # 1. Model Architecture Configuration
 model:
   img_size: 224
-  patch_size: 4
+  patch_size: 2
   in_channels: 3
 
   # Encoder Configuration (from ViT model)
@@ -31,7 +31,7 @@ training:
   eta_min: 0.000001
   
   num_epochs: 300
-  batch_size: 64
+  batch_size: 16
 
   use_compile: false
   use_fused_optimizer: false
