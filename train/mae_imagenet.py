@@ -48,7 +48,7 @@ def setup_ddp(rank, world_size):
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
     """
     Creates and saves a visualization of the original, masked, and reconstructed images using Matplotlib.
-    Includes the crucial denormalization step for accurate visualization.
+    This version shows a composite of original visible patches and reconstructed masked patches for intuitive evaluation.
     """
     # --- 1. 准备张量 ---
     # 将张量分离、移动到 CPU，并转换为 NumPy 数组
@@ -69,20 +69,23 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # 涂黑
 
-    # --- 3. 创建重建的图像 (添加了反归一化) ---
+    # --- 3. 创建一个混合重建图像 (更直观的可视化) ---
+    
+    # --- 关键修改：从原始图像副本开始，只填充被遮蔽的部分 ---
+    # 1. 这能让我们清晰地看到模型在给定可见部分的情况下，对未知部分的预测能力
     reconstructed_img = original_img.copy()
     
-    # --- 关键修改：修正 Reshape 的逻辑 ---
-    # 1. 首先按照模型的平面输出格式 (C, P, P) 来重塑
+    # 2. 修正 Reshape 的逻辑
     recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size)
     
+    # 3. 只用模型的预测结果填充被遮蔽的区域
     for i in range(N):
-        if mask[i]:  # 只处理被遮蔽的图像块
+        if mask[i]:
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             
-            # 2. 将单个图像块从 (C, P, P) 转置为 (P, P, C) 以便后续处理
+            # 将单个图像块从 (C, P, P) 转置为 (P, P, C)
             recon_patch_chw = recon_patches_reshaped[i]
             recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
             
@@ -101,7 +104,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
 
     # 绘制原始图像
-    axes[0].imshow(original_img) # imshow 默认处理 [0,1] 范围的浮点数
+    axes[0].imshow(original_img)
     axes[0].set_title("Original")
     axes[0].axis('off')
 
@@ -112,7 +115,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
 
     # 绘制重建的图像
     axes[2].imshow(reconstructed_img)
-    axes[2].set_title("Reconstructed")
+    axes[2].set_title("Reconstruction (Visible + Predicted)") # 标题改为更能反映混合图像
     axes[2].axis('off')
 
     os.makedirs(output_dir, exist_ok=True)
