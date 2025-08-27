@@ -78,9 +78,12 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     # 2. 修正 Reshape 的逻辑
     recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size)
     
-    # 3. 只用模型的预测结果填充被遮蔽的区域
+    # --- 关键修改：使用 ImageNet 的标准均值和方差进行反归一化 ---
+    imagenet_mean = np.array([0.485, 0.456, 0.406])
+    imagenet_std = np.array([0.229, 0.224, 0.225])
+    
     for i in range(N):
-        if mask[i]:
+        if mask[i]:  # 只处理被遮蔽的图像块
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
@@ -89,19 +92,14 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             recon_patch_chw = recon_patches_reshaped[i]
             recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
             
-            # --- 反归一化 ---
-            # original_patch = original_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
-            # mean = original_patch.mean(axis=(0, 1))
-            # std = original_patch.std(axis=(0, 1))
+            # 使用 ImageNet 统计数据进行反归一化
+            # recon_patch_hwc 是一个标准化后的 patch (均值为0, 方差为1)
+            # 我们需要先乘以标准差，再加上均值来恢复
+            denorm_patch = recon_patch_hwc * imagenet_std + imagenet_mean
             
-            # denorm_patch = recon_patch_hwc * (std + 1e-6) + mean
+            # 将反归一化后的图像块放回图片中
+            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
             
-            # # 将反归一化后的图像块放回图片中
-            # reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
-
-            # 改为（不反标，直接贴）：
-            reconstructed_img[start_h:start_h+patch_size, start_w:start_w+patch_size, :] = \
-                np.clip(recon_patch_hwc, 0, 1)
             
     # --- 4. 绘制并保存图像 ---
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))

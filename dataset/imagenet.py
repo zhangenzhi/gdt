@@ -95,7 +95,7 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     transform_train = transforms.Compose([
         transforms.RandomResizedCrop(img_size, scale=(0.2, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.ToTensor(),
-        # transforms.Normalize(mean=mean, std=std)
+        transforms.Normalize(mean=mean, std=std)
     ])
     
     # Validation data augmentation
@@ -103,7 +103,7 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
         transforms.Resize(img_size + 32, interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.CenterCrop(img_size),
         transforms.ToTensor(),
-        # transforms.Normalize(mean=mean, std=std)
+        transforms.Normalize(mean=mean, std=std)
     ])
     # 数据增强部分保持不变
     data_transforms = {'train':transform_train, 'val': transform_val}
