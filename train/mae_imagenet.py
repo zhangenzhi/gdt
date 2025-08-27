@@ -362,7 +362,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/mae-vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='mae_pretrain', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='mae_vit-b16-p2-m95', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='mae_vit-b16-p2-m99', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
