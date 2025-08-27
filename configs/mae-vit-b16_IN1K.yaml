@@ -18,7 +18,7 @@ model:
   decoder_heads: 16
   
   # Masking Configuration (MAE-specific)
-  mask_ratio: 0.9
+  mask_ratio: 0.95
 
 # 2. Training Hyperparameters
 training:
