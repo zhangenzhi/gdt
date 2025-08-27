@@ -4,7 +4,7 @@ task_name: "mae_imagenet_pretrain"
 # 1. Model Architecture Configuration
 model:
   img_size: 224
-  patch_size: 2
+  patch_size: 16
   in_channels: 3
 
   # Encoder Configuration (from ViT model)
@@ -18,7 +18,7 @@ model:
   decoder_heads: 16
   
   # Masking Configuration (MAE-specific)
-  mask_ratio: 0.99
+  mask_ratio: 0.75
 
 # 2. Training Hyperparameters
 training:
@@ -31,7 +31,7 @@ training:
   eta_min: 0.000001
   
   num_epochs: 300
-  batch_size: 16
+  batch_size: 512
 
   use_compile: false
   use_fused_optimizer: false
