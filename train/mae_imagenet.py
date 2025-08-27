@@ -90,14 +90,18 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
             
             # --- 反归一化 ---
-            original_patch = original_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
-            mean = original_patch.mean(axis=(0, 1))
-            std = original_patch.std(axis=(0, 1))
+            # original_patch = original_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
+            # mean = original_patch.mean(axis=(0, 1))
+            # std = original_patch.std(axis=(0, 1))
             
-            denorm_patch = recon_patch_hwc * (std + 1e-6) + mean
+            # denorm_patch = recon_patch_hwc * (std + 1e-6) + mean
             
-            # 将反归一化后的图像块放回图片中
-            reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
+            # # 将反归一化后的图像块放回图片中
+            # reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
+
+            # 改为（不反标，直接贴）：
+            reconstructed_img[start_h:start_h+patch_size, start_w:start_w+patch_size, :] = \
+                np.clip(recon_patch_hwc, 0, 1)
             
     # --- 4. 绘制并保存图像 ---
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
