@@ -19,6 +19,12 @@ class MAEEncoder(nn.Module):
         # Create a ViT model from timm
         self.model = timm.create_model(model_name, pretrained=pretrained)
         
+        # --- CRITICAL FIX for DDP ---
+        # The timm ViT model comes with a classification head (`model.head`) that we don't use
+        # in the MAE encoder. If we don't remove it, its parameters will not receive gradients,
+        # causing a RuntimeError in DDP. Replacing it with an Identity layer solves this.
+        self.model.head = nn.Identity()
+        
         # We will manually handle the forward pass to implement the MAE logic,
         # so we only need the components from the timm model.
         # The following attributes are aliased for clarity and direct access,
