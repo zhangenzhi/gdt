@@ -48,20 +48,33 @@ def setup_ddp(rank, world_size):
 def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step, output_dir, prefix="train"):
     """
     Creates and saves a visualization of the original, masked, and reconstructed images using Matplotlib.
-    This version shows a composite of original visible patches and reconstructed masked patches for intuitive evaluation.
+    This version correctly denormalizes all parts of the image for accurate visualization.
     """
-    # --- 1. 准备张量 ---
-    # 将张量分离、移动到 CPU，并转换为 NumPy 数组
-    original_img = original_img.cpu().to(torch.float32).permute(1, 2, 0).numpy()
+    # --- 1. 准备并反归一化张量 ---
+    # 定义 ImageNet 的标准均值和方差
+    imagenet_mean = np.array([0.485, 0.456, 0.406])
+    imagenet_std = np.array([0.229, 0.224, 0.225])
+
+    # 将 PyTorch 张量 (C, H, W) 转换为 NumPy 数组 (H, W, C)
+    original_img_chw = original_img.cpu().to(torch.float32)
+    original_img_hwc = original_img_chw.permute(1, 2, 0).numpy()
+    
+    # --- 关键修改：对整个原始图像进行反归一化 ---
+    # 这样可以确保我们展示的“原始图像”和“可见图像块”都具有正确的颜色
+    original_img_denorm = original_img_hwc * imagenet_std + imagenet_mean
+    original_img_denorm = np.clip(original_img_denorm, 0, 1) # 裁剪到有效的 [0, 1] 范围
+
+    # 准备其他 NumPy 数组
     recon_patches = recon_patches.cpu().to(torch.float32).numpy()
     mask = mask.cpu().numpy()
     
-    H, W, C = original_img.shape
+    H, W, C = original_img_denorm.shape
     N = mask.shape[0]
     num_patches_w = W // patch_size
     
     # --- 2. 创建被遮蔽的图像 ---
-    masked_img = original_img.copy()
+    # 从已经反归一化的图像开始创建
+    masked_img = original_img_denorm.copy()
     for i in range(N):
         if mask[i]:  # 检查 True (被遮蔽) 的图像块
             h_idx = i // num_patches_w
@@ -69,18 +82,12 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # 涂黑
 
-    # --- 3. 创建一个混合重建图像 (更直观的可视化) ---
+    # --- 3. 创建重建的图像 ---
+    # 从已经反归一化的图像开始，这样可见部分已经是正确的了
+    reconstructed_img = original_img_denorm.copy()
     
-    # --- 关键修改：从原始图像副本开始，只填充被遮蔽的部分 ---
-    # 1. 这能让我们清晰地看到模型在给定可见部分的情况下，对未知部分的预测能力
-    reconstructed_img = original_img.copy()
-    
-    # 2. 修正 Reshape 的逻辑
+    # 按照模型的平面输出格式 (C, P, P) 来重塑
     recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size)
-    
-    # --- 关键修改：使用 ImageNet 的标准均值和方差进行反归一化 ---
-    imagenet_mean = np.array([0.485, 0.456, 0.406])
-    imagenet_std = np.array([0.229, 0.224, 0.225])
     
     for i in range(N):
         if mask[i]:  # 只处理被遮蔽的图像块
@@ -92,21 +99,18 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
             recon_patch_chw = recon_patches_reshaped[i]
             recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
             
-            # 使用 ImageNet 统计数据进行反归一化
-            # recon_patch_hwc 是一个标准化后的 patch (均值为0, 方差为1)
-            # 我们需要先乘以标准差，再加上均值来恢复
+            # 对模型重建的图像块进行反归一化
             denorm_patch = recon_patch_hwc * imagenet_std + imagenet_mean
             
             # 将反归一化后的图像块放回图片中
             reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
             
-            
     # --- 4. 绘制并保存图像 ---
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
 
-    # 绘制原始图像
-    axes[0].imshow(original_img)
+    # 绘制原始图像（已反归一化）
+    axes[0].imshow(original_img_denorm)
     axes[0].set_title("Original")
     axes[0].axis('off')
 
@@ -117,7 +121,7 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
 
     # 绘制重建的图像
     axes[2].imshow(reconstructed_img)
-    axes[2].set_title("Reconstruction (Visible + Predicted)") # 标题改为更能反映混合图像
+    axes[2].set_title("Reconstructed")
     axes[2].axis('off')
 
     os.makedirs(output_dir, exist_ok=True)
