@@ -17,7 +17,8 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 sys.path.append("./")
-from model.mae import MAE
+# from model.mae import MAE
+from model.timm_mae import MAE
 from dataset.imagenet import build_mae_dataloaders
 from dataset.utlis import param_groups_lrd # Still useful for LRD
 
