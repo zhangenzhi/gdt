@@ -1,0 +1,31 @@
+# --------------------------------------------------- #
+#   MAE 微调配置文件: ViT-Base/16 on ImageNet-1K      #
+# --------------------------------------------------- #
+
+# --- 模型相关配置 ---
+model:
+  name: 'vit_base_patch16_224'   # 使用 timm 的 ViT-Base 模型，patch size 为 16x16
+  num_classes: 1000               # ImageNet-1K 有 1000 个类别
+  drop_path_rate: 0.1             # 随机深度（Stochastic Depth）的丢弃率，用于正则化，防止过拟合
+
+# --- 数据处理与增强配置 ---
+data:
+  img_size: 224                   # 输入图像尺寸
+  color_jitter: 0.4               # 颜色抖动强度
+  auto_augment: 'rand-m9-mstd0.5-inc1' # timm 提供的 RandAugment 策略
+  re_prob: 0.25                   # Random Erasing 的概率
+  re_mode: 'pixel'                # Random Erasing 的模式
+  re_count: 1                     # Random Erasing 的区域数量
+  
+  # Mixup 和 CutMix 配置 (强大的数据增强，能显著提升性能)
+  mixup: 0.8                      # Mixup 的 alpha 参数
+  cutmix: 1.0                     # CutMix 的 alpha 参数
+  mixup_prob: 1.0                 # 应用 Mixup 或 CutMix 的总概率
+
+# --- 训练过程相关配置 ---
+training:
+  num_epochs: 100                 # 总训练轮数
+  warmup_epochs: 5                # 学习率预热的轮数
+  learning_rate: 1e-3             # 基础学习率 (通常与总 batch size 相关，1e-3 对应 1024 的总 batch size)
+  weight_decay: 0.05              # 权重衰减
+  layer_decay: 0.65               # 层衰减学习率 (LLRD) 的衰减率，靠近输入的层学习率更低
