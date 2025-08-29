@@ -60,10 +60,9 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     original_img_chw = original_img.cpu().to(torch.float32)
     original_img_hwc = original_img_chw.permute(1, 2, 0).numpy()
     
-    # --- 关键修改：对整个原始图像进行反归一化 ---
-    # 这样可以确保我们展示的“原始图像”和“可见图像块”都具有正确的颜色
+    # 对整个原始图像进行反归一化，以正确显示
     original_img_denorm = original_img_hwc * imagenet_std + imagenet_mean
-    original_img_denorm = np.clip(original_img_denorm, 0, 1) # 裁剪到有效的 [0, 1] 范围
+    original_img_denorm = np.clip(original_img_denorm, 0, 1)
 
     # 准备其他 NumPy 数组
     recon_patches = recon_patches.cpu().to(torch.float32).numpy()
@@ -74,60 +73,60 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     num_patches_w = W // patch_size
     
     # --- 2. 创建被遮蔽的图像 ---
-    # 从已经反归一化的图像开始创建
     masked_img = original_img_denorm.copy()
     for i in range(N):
-        if mask[i]:  # 检查 True (被遮蔽) 的图像块
+        if mask[i]:
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
-            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0 # 涂黑
+            masked_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = 0
 
     # --- 3. 创建重建的图像 ---
-    # 从已经反归一化的图像开始，这样可见部分已经是正确的了
     reconstructed_img = original_img_denorm.copy()
     
-    # 按照模型的平面输出格式 (C, P, P) 来重塑
     recon_patches_reshaped = recon_patches.reshape(N, C, patch_size, patch_size)
     
     for i in range(N):
-        if mask[i]:  # 只处理被遮蔽的图像块
+        if mask[i]:
             h_idx = i // num_patches_w
             w_idx = i % num_patches_w
             start_h, start_w = h_idx * patch_size, w_idx * patch_size
             
-            # 将单个图像块从 (C, P, P) 转置为 (P, P, C)
             recon_patch_chw = recon_patches_reshaped[i]
             recon_patch_hwc = recon_patch_chw.transpose(1, 2, 0)
             
-            # 对模型重建的图像块进行反归一化
-            denorm_patch = recon_patch_hwc * imagenet_std + imagenet_mean
+            # --- 关键修改：使用局部的均值和标准差进行反归一化 ---
+            # 1. 从已反归一化的原图中，获取当前位置的原始图像块
+            original_patch = original_img_denorm[start_h:start_h + patch_size, start_w:start_w + patch_size, :]
             
-            # 将反归一化后的图像块放回图片中
+            # 2. 计算这个局部图像块的均值和标准差
+            mean = original_patch.mean(axis=(0, 1))
+            std = original_patch.std(axis=(0, 1))
+            
+            # 3. 使用这个局部的统计数据来反归一化重建的图像块
+            denorm_patch = recon_patch_hwc * (std + 1e-6) + mean
+            
             reconstructed_img[start_h:start_h + patch_size, start_w:start_w + patch_size, :] = np.clip(denorm_patch, 0, 1)
             
     # --- 4. 绘制并保存图像 ---
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     fig.suptitle(f"Loss: {loss:.4f} | Step: {step}", fontsize=16)
 
-    # 绘制原始图像（已反归一化）
     axes[0].imshow(original_img_denorm)
     axes[0].set_title("Original")
     axes[0].axis('off')
 
-    # 绘制被遮蔽的图像
     axes[1].imshow(masked_img)
     axes[1].set_title("Masked Input")
     axes[1].axis('off')
 
-    # 绘制重建的图像
     axes[2].imshow(reconstructed_img)
     axes[2].set_title("Reconstructed")
     axes[2].axis('off')
 
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
-    plt.close(fig) # 关闭图像以释放内存
+    plt.close(fig)
 
 def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device_id, args, start_epoch, is_ddp=False):
     """
