@@ -148,6 +148,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
+            # 每个 step 结束后更新学习率
+            if scheduler:
+                scheduler.step()
             
             # --- 评估逻辑 ---
             _, predicted = torch.max(outputs.data, 1)
@@ -161,9 +164,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
 
-        # 每个 epoch 结束后更新学习率
-        if scheduler:
-            scheduler.step()
+        # # 每个 epoch 结束后更新学习率
+        # if scheduler:
+        #     scheduler.step()
 
         val_acc = evaluate_model_compatible(model, val_loader, device_id, is_ddp=is_ddp)
                 
