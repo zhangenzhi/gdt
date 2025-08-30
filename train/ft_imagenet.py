@@ -294,7 +294,7 @@ def main(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAE Fine-tuning Script on ImageNet")
     parser.add_argument('--config', type=str, default='./configs/ft_vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
-    parser.add_argument('--mae_checkpoint', type=str, required=True, help='Path to the pre-trained MAE checkpoint.')
+    parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b16-timm/, help='Path to the pre-trained MAE checkpoint.')
     parser.add_argument('--output', type=str, default='./output/finetune', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae_vit-b16_finetune', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/path/to/imagenet/", help='Path to the ImageNet dataset directory')
