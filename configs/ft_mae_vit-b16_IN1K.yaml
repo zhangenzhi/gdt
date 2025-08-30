@@ -24,6 +24,7 @@ data:
 
 # --- 训练过程相关配置 ---
 training:
+  batch_size: 1024
   num_epochs: 100                 # 总训练轮数
   warmup_epochs: 5                # 学习率预热的轮数
   learning_rate: 1e-3             # 基础学习率 (通常与总 batch size 相关，1e-3 对应 1024 的总 batch size)
