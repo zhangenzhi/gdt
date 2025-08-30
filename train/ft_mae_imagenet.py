@@ -257,7 +257,7 @@ def vit_imagenet_train_single(args, config):
         param_groups,
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
-        betas=tuple(config['training'].get('betas', (0.9, 0.95)))
+        betas=tuple(config['training'].get('betas', (0.9, 0.999)))
     )
     
     training_config = config['training']
