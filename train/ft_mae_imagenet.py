@@ -280,7 +280,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--config', type=str, default='./configs/ft_mae_vit-b16_IN1K.yaml', help='Path to the YAML configuration file (ft_vit-b16_IN1K.yaml).')
     # 新增：指定 MAE 检查点路径的参数
-    parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b16-timm/, help='Path to the pre-trained MAE checkpoint.')
+    parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b16-timm/', help='Path to the pre-trained MAE checkpoint.')
     
     parser.add_argument('--output', type=str, default='./output/finetune', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae-ft-vit-b-16', help='Subdirectory for saving logs and models')
