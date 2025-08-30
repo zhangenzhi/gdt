@@ -225,7 +225,7 @@ def vit_imagenet_train_single(args, config):
 
     # --- 数据加载器 (保持不变) ---
     dataloaders = imagenet_distribute(
-        img_size=config['data']['img_size'],
+        img_size=config['model']['img_size'],
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers
@@ -281,20 +281,25 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/ft_mae_vit-b16_IN1K.yaml', help='Path to the YAML configuration file (ft_vit-b16_IN1K.yaml).')
     # 新增：指定 MAE 检查点路径的参数
     parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b16-timm/', help='Path to the pre-trained MAE checkpoint.')
-    
     parser.add_argument('--output', type=str, default='./output/finetune', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae-ft-vit-b-16', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size PER GPU')
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     
     args = parser.parse_args()
+
     
+    # Load config from YAML file
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+
+    # Update args from config for consistency
+    args.img_size = config['model']['img_size']
+    args.num_epochs = config['training']['num_epochs']
+    args.batch_size = config['training']['batch_size']
     
-    args.output = os.path.join(args.output, args.savefile)
+    args.output = os.path.join(args.output, args.task)
     os.makedirs(args.output, exist_ok=True)
     
     vit_imagenet_train_single(args, config)
