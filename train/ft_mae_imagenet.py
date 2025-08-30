@@ -295,7 +295,7 @@ if __name__ == "__main__":
         config = yaml.safe_load(f)
 
     # Update args from config for consistency
-    args.img_size = config['model']['img_size']
+    args.img_size = config['data']['img_size']
     args.num_epochs = config['training']['num_epochs']
     args.batch_size = config['training']['batch_size']
     
