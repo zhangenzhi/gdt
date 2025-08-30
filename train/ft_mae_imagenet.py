@@ -225,7 +225,7 @@ def vit_imagenet_train_single(args, config):
 
     # --- 数据加载器 (保持不变) ---
     dataloaders = imagenet_distribute(
-        img_size=config['model']['img_size'],
+        img_size=config['data']['img_size'],
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers
