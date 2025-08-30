@@ -92,7 +92,7 @@ def get_finetune_model(config, args):
     创建一个 timm ViT 模型，并从 MAE 检查点加载预训练权重。
     """
     model = timm.create_model(
-        config['model']['name'],
+        config['data']['name'],
         pretrained=False, # 我们将手动加载权重
         num_classes=config['model']['num_classes'],
         drop_path_rate=config['model'].get('drop_path_rate', 0.1)
