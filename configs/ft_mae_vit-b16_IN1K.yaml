@@ -25,9 +25,9 @@ data:
 
 # --- 训练过程相关配置 ---
 training:
-  batch_size: 1024
+  batch_size: 256
   num_epochs: 100                 # 总训练轮数
   warmup_epochs: 5                # 学习率预热的轮数
-  learning_rate: 0.0012             # 基础学习率 (通常与总 batch size 相关，1e-3 对应 1024 的总 batch size)
+  learning_rate: 0.003            # 基础学习率 (通常与总 batch size 相关，1e-3 对应 1024 的总 batch size)
   weight_decay: 0.05              # 权重衰减
-  layer_decay: 0.65               # 层衰减学习率 (LLRD) 的衰减率，靠近输入的层学习率更低
+  layer_decay: 0.75               # 层衰减学习率 (LLRD) 的衰减率，靠近输入的层学习率更低
