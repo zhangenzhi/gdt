@@ -430,7 +430,7 @@ if __name__ == "__main__":
     #     sample_masks.append()
     #     seq_masks.append(dem)
         
-    import tqdm
+    from tqdm import tqdm
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', default="/work/c30636/dataset/s8d/pretrain", 
