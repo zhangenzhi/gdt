@@ -454,4 +454,4 @@ if __name__ == "__main__":
 
     # Now you can iterate over the dataloader to get batches of images and masks
     for batch in dataloader:
-        image = batch
+        print(batch.shape, batch.mean())
