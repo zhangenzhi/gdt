@@ -29,18 +29,13 @@ class Spring8Dataset(Dataset):
         
         for subdir in self.subslides:
             subdir_path = os.path.join(data_path, subdir)
-            if os.path.isdir(subdir_path):
-                sample_path = os.listdir(subdir_path)
-                for sampledir in sample_path:
-                    sample_slice_path = os.path.join(subdir_path, sampledir)
-                    if os.path.isdir(sample_slice_path):
-                        num_sample_slice = len(os.listdir(sample_slice_path))
-                        for i in range(num_sample_slice):
-                            # Ensure the image exist
-                            img_name = f"volume_{str(i).zfill(3)}.raw"
-                            image = os.path.join(sample_slice_path, img_name)
-                            if os.path.exists(image):
-                                self.image_filenames.extend([image])
+            num_sample_slice = len(os.listdir(subdir_path))
+            for i in range(num_sample_slice):
+                # Ensure the image exist
+                img_name = f"volume_{str(i).zfill(3)}.raw"
+                image = os.path.join(subdir_path, img_name)
+                if os.path.exists(image):
+                    self.image_filenames.extend([image])
         print("img tiles: ", len(self.image_filenames))
         
         self.transform= transforms.Compose([
