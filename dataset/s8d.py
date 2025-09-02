@@ -439,10 +439,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', default="s8d", 
                         help='base path of dataset.')
-    parser.add_argument('--data_dir', default="/lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1", 
-                        help='base path of dataset.')
-    # parser.add_argument('--data_dir', default="/Users/zhangenzhi/dataset/s8d/pretrain", 
+    # parser.add_argument('--data_dir', default="/lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1", 
     #                     help='base path of dataset.')
+    parser.add_argument('--data_dir', default="/work/c30636/dataset/s8d/pretrain", 
+                        help='base path of dataset.')
     parser.add_argument('--epoch', default=1, type=int,
                         help='Epoch of training.')
     parser.add_argument('--batch_size', default=1, type=int,
