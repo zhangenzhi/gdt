@@ -25,6 +25,8 @@ class Spring8Dataset(Dataset):
         self.subslides = os.listdir(data_path)
         self.image_filenames = []
 
+        import pdb;pdb.set_trace()
+        
         for subdir in self.subslides:
             subdir_path = os.path.join(data_path, subdir)
             if os.path.isdir(subdir_path):
