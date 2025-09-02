@@ -430,23 +430,54 @@ if __name__ == "__main__":
     #     sample_masks.append()
     #     seq_masks.append(dem)
         
+    import tqdm
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', default="s8d", 
-                        help='base path of dataset.')
-    # parser.add_argument('--data_dir', default="/lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1", 
-    #                     help='base path of dataset.')
     parser.add_argument('--data_dir', default="/work/c30636/dataset/s8d/pretrain", 
                         help='base path of dataset.')
-    parser.add_argument('--epoch', default=1, type=int,
-                        help='Epoch of training.')
-    parser.add_argument('--batch_size', default=1, type=int,
-                        help='Batch_size for training')
+    parser.add_argument('--batch_size', default=4, type=int, # 批量保存时可以适当增大batch_size以提高读取效率
+                        help='Batch_size for loading data')
+    parser.add_argument('--output_dir', default="./output_images", type=str,
+                        help='Directory to save the output images.')
     args = parser.parse_args()
     
-    dataset = Spring8Dataset(args.data_dir, resolution=8192)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    # 检查数据路径是否存在
+    if not os.path.isdir(args.data_dir):
+        print(f"错误：找不到数据目录 '{args.data_dir}'。请检查路径是否正确。")
+    else:
+        # 1. 创建用于保存图像的输出文件夹
+        os.makedirs(args.output_dir, exist_ok=True)
+        print(f"图像将保存到: {args.output_dir}")
 
-    # Now you can iterate over the dataloader to get batches of images and masks
-    for batch in dataloader:
-        print(batch.shape, batch.mean())
+        dataset = Spring8Dataset(args.data_dir, resolution=8192)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4) # 可以增加 num_workers 加速数据加载
+
+        # 检查 dataloader 是否为空
+        if len(dataloader) == 0:
+            print("Dataloader 为空，没有图像可以保存。")
+        else:
+            # 2. 遍历整个 DataLoader
+            image_counter = 0
+            # 使用tqdm来包装dataloader，以显示进度条
+            for batch in tqdm(dataloader, desc="正在保存图像"):
+                # batch 的形状是 [batch_size, 1, H, W]
+                
+                # 3. 遍历批次中的每一张图片
+                for i in range(batch.shape[0]):
+                    # 获取单张图片的 tensor
+                    image_tensor = batch[i]
+                    
+                    # 将 tensor 转换为 NumPy 数组 (H, W)
+                    image_to_save = image_tensor.squeeze().cpu().numpy()
+                    
+                    # 4. 定义文件名并保存
+                    # 使用 .zfill(6) 确保文件名按数字顺序排列 (例如: image_000001.png)
+                    filename = f"image_{str(image_counter).zfill(6)}.png"
+                    save_path = os.path.join(args.output_dir, filename)
+                    
+                    # 使用 plt.imsave 直接保存，效率更高
+                    plt.imsave(save_path, image_to_save, cmap='gray')
+                    
+                    image_counter += 1
+
+            print(f"\n处理完成！共保存了 {image_counter} 张图像。")
