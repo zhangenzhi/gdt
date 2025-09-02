@@ -24,8 +24,6 @@ class Spring8Dataset(Dataset):
         self.resolution = resolution
         self.subslides = os.listdir(data_path)
         self.image_filenames = []
-
-        import pdb;pdb.set_trace()
         
         for subdir in self.subslides:
             subdir_path = os.path.join(data_path, subdir)
@@ -33,9 +31,9 @@ class Spring8Dataset(Dataset):
             for i in range(num_sample_slice):
                 # Ensure the image exist
                 img_name = f"volume_{str(i).zfill(3)}.raw"
-                image = os.path.join(subdir_path, img_name)
-                if os.path.exists(image):
-                    self.image_filenames.extend([image])
+                image_path = os.path.join(subdir_path, img_name)
+                if os.path.exists(image_path):
+                    self.image_filenames.extend([image_path])
         print("img tiles: ", len(self.image_filenames))
         
         self.transform= transforms.Compose([
