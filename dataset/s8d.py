@@ -1,483 +1,192 @@
+
+
 import os
-import sys
 sys.path.append("./")
-import argparse
-from pathlib import Path
-import numpy as np
-from PIL import Image, ImageFile
 import torch
-import tifffile
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-from gdt.shf import ImagePatchify
-
-from torch.utils.data.dataloader import default_collate
-
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import random_split
+import torchvision.transforms as transforms
+import argparse
+from tqdm import tqdm
+from PIL import Image, ImageFile
 # Set the flag to load truncated images
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+
 class Spring8Dataset(Dataset):
-    def __init__(self, data_path, resolution):
-        self.data_path = data_path
-        self.resolution = resolution
-        self.subslides = os.listdir(data_path)
-        self.image_filenames = []
-        
-        for subdir in self.subslides:
-            subdir_path = os.path.join(data_path, subdir)
-            num_sample_slice = len(os.listdir(subdir_path))
-            for i in range(num_sample_slice):
-                # Ensure the image exist
-                img_name = f"volume_{str(i).zfill(3)}.raw"
-                image_path = os.path.join(subdir_path, img_name)
-                if os.path.exists(image_path):
-                    self.image_filenames.extend([image_path])
-        print("img tiles: ", len(self.image_filenames))
-        
-        self.transform= transforms.Compose([
-                transforms.ToTensor(),
-            ])
-
-    def __len__(self):
-        return len(self.image_filenames)
-
-    def __getitem__(self, idx):
-        img_name = self.image_filenames[idx]
-        image = np.fromfile(img_name, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
-        image = (image[:] / 255).astype(np.uint8)
-        image = self.transform(image)
-        return image
-
-class Spring8DatasetAP(Dataset):
-    def __init__(self, data_path, resolution, fixed_length=1024, sths=[0,1,3,5,7], cannys=[50, 100], patch_size=16, ):
-        self.data_path = data_path
-        self.resolution = resolution
-        self.patchify = ImagePatchify(sths=sths, fixed_length=fixed_length, cannys=cannys, patch_size=patch_size, num_channels=1)
-
-        self.subslides = os.listdir(data_path)
-        self.image_filenames = []
-
-        for subdir in self.subslides:
-            subdir_path = os.path.join(data_path, subdir)
-            if os.path.isdir(subdir_path):
-                sample_path = os.listdir(subdir_path)
-                for sampledir in sample_path:
-                    sample_slice_path = os.path.join(subdir_path, sampledir)
-                    if os.path.isdir(sample_slice_path):
-                        num_sample_slice = len(os.listdir(sample_slice_path))
-                        for i in range(num_sample_slice):
-                            # Ensure the image exist
-                            img_name = f"volume_{str(i).zfill(3)}.raw"
-                            image = os.path.join(sample_slice_path, img_name)
-                            if os.path.exists(image):
-                                self.image_filenames.extend([image])
-        print("img tiles: ", len(self.image_filenames))
-        
-        self.transform= transforms.Compose([
-                transforms.ToTensor(),
-            ])
-
-    def __len__(self):
-        return len(self.image_filenames)
-
-    def __getitem__(self, idx):
-        img_name = self.image_filenames[idx]
-        image = np.fromfile(img_name, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
-        image = (image[:] / 255).astype(np.uint8)
-        seq_img, seq_size, seq_pos = self.patchify(image)
-        seq_img = self.transform(seq_img)
-        return seq_img, seq_size, seq_pos
-    
-class S8DGanAP(Dataset):
-    def __init__(self, data_path, resolution, fixed_length=1024, sths=[0,1,3,5,7], cannys=[50, 100], patch_size=16, ):
-        self.data_path = data_path
-        self.resolution = resolution
-        self.patchify = ImagePatchify(sths=sths, fixed_length=fixed_length, cannys=cannys, patch_size=patch_size, num_channels=1)
-
-        self.subslides = os.listdir(data_path)
-        self.image_filenames = []
-
-        for subdir in self.subslides:
-            subdir_path = os.path.join(data_path, subdir)
-            if os.path.isdir(subdir_path):
-                sample_path = os.listdir(subdir_path)
-                for sampledir in sample_path:
-                    sample_slice_path = os.path.join(subdir_path, sampledir)
-                    if os.path.isdir(sample_slice_path):
-                        num_sample_slice = len(os.listdir(sample_slice_path))
-                        for i in range(num_sample_slice):
-                            # Ensure the image exist
-                            img_name = f"volume_{str(i).zfill(3)}.raw"
-                            image = os.path.join(sample_slice_path, img_name)
-                            if os.path.exists(image):
-                                self.image_filenames.extend([image])
-        print("img samples: ", len(self.image_filenames))
-        
-        self.transform= transforms.Compose([
-                transforms.ToTensor(),
-            ])
-
-    def __len__(self):
-        return len(self.image_filenames)
-
-    def __getitem__(self, idx):
-        img_name = self.image_filenames[idx]
-        image = np.fromfile(img_name, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
-        image = (image[:] / 255).astype(np.uint8)
-        seq_img, seq_size, seq_pos = self.patchify(image)
-        seq_img = self.transform(seq_img)
-        return seq_img, seq_size, seq_pos
-
-class S8DFinetuneAP(Dataset):
-    def __init__(self, data_path, resolution, fixed_length=1024, sths=[0,1,3,5,7], cannys=[50, 100], patch_size=16, ):
-        self.data_path = data_path
-        self.resolution = resolution
-        self.patchify = ImagePatchify(sths=sths, fixed_length=fixed_length, cannys=cannys, patch_size=patch_size, num_channels=1)
-
-        self.subslides = os.listdir(data_path)
-        self.image_filenames = []
-
-        for subdir in self.subslides:
-            subdir_path = os.path.join(data_path, subdir)
-            if os.path.isdir(subdir_path):
-                sample_path = os.listdir(subdir_path)
-                for sampledir in sample_path:
-                    sample_slice_path = os.path.join(subdir_path, sampledir)
-                    if os.path.isdir(sample_slice_path):
-                        num_sample_slice = len(os.listdir(sample_slice_path))
-                        for i in range(num_sample_slice):
-                            # Ensure the image exist
-                            img_name = f"volume_{str(i).zfill(3)}.raw"
-                            image = os.path.join(sample_slice_path, img_name)
-                            if os.path.exists(image):
-                                self.image_filenames.extend([image])
-        print("img samples: ", len(self.image_filenames))
-        
-        self.transform= transforms.Compose([
-                transforms.ToTensor(),
-            ])
-
-    def __len__(self):
-        return len(self.image_filenames)
-
-    def __getitem__(self, idx):
-        img_name = self.image_filenames[idx]
-        image = np.fromfile(img_name, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
-        image = (image[:] / 255).astype(np.uint8)
-        seq_img, seq_size, seq_pos = self.patchify(image)
-        seq_img = self.transform(seq_img)
-        return seq_img, seq_size, seq_pos
-
-class S8DFinetune(Dataset):
-    def __init__(self, root_dir, transform=None, target_transform=None):
-        """
-        Args:
-            root_dir (string): Path to the root directory containing FBPs and labels folders.
-            transform (callable, optional): Optional transform to be applied on the FBP images.
-            target_transform (callable, optional): Optional transform to be applied on the labels.
-        """
-        self.root_dir = root_dir
-        self.fbp_dir = os.path.join(root_dir, 'FBPs')
-        self.label_dir = os.path.join(root_dir, 'labels')
-        self.num_classes = 5
-        self.transform = transform
-        self.target_transform = target_transform
-        
-        # Get list of files (without extensions to match FBPs and labels)
-        self.fbp_files = [f for f in os.listdir(self.fbp_dir) if f.endswith('.tiff')]
-        
-        # Verify corresponding labels exist
-        self.valid_files = []
-        for fbp_file in self.fbp_files:
-            # Extract base name (assuming pattern: ..._reconFBPsimul_RingAF_12.tiff)
-            base_name = fbp_file.split('_reconFBPsimul_')[0]
-            label_file = f"{base_name}_label.tiff"
-            if os.path.exists(os.path.join(self.label_dir, label_file)):
-                self.valid_files.append((fbp_file, label_file))
-            else:
-                print(f"Warning: Missing label for {fbp_file}")
-        print(self.valid_files)
-    
-    def __len__(self):
-        return len(self.valid_files)
-    
-    def __getitem__(self, idx):
-        fbp_file, label_file = self.valid_files[idx]
-        
-        # Load FBP image
-        fbp_path = os.path.join(self.fbp_dir, fbp_file)
-        fbp_array = tifffile.imread(fbp_path)
-        # fbp_array = np.array(fbp_image)
-        
-        # Load label/mask
-        label_path = os.path.join(self.label_dir, label_file)
-        label_array = tifffile.imread(label_path)
-        # label_array = np.array(label_image)
-        
-        # Apply transforms if any
-        if self.transform:
-            fbp_array = self.transform(fbp_array)
-        if self.target_transform:
-            label_array = self.target_transform(label_array)
-            
-        # Convert to tensors
-        fbp_tensor = torch.from_numpy(fbp_array).float()
-        label_tensor = torch.from_numpy(label_array).long()  # Assuming labels are integers
-        # label_tensor = F.one_hot(label_tensor, num_classes=self.num_classes).permute(2, 0, 1).float()
-        
-        # # Add channel dimension if needed (for 2D images)
-        # if len(fbp_tensor.shape) == 2:
-        #     fbp_tensor = fbp_tensor.unsqueeze(0)  # Shape: (1, H, W)
-        # if len(label_tensor.shape) == 2:
-        #     one_hot_label_tensor = one_hot_label_tensor.unsqueeze(0)  # Shape: (1, H, W)
-            
-        return fbp_tensor, label_tensor
-
-class S8DFinetune2D(Dataset):
-    """PyTorch Dataset for loading 2D slices"""
-    
-    def __init__(self, slice_dir, num_classes=5, transform=None, target_transform=None, subset=None):
-        """
-        Args:
-            slice_dir: Directory containing the slices
-            transform: Transformations for images
-            target_transform: Transformations for labels
-            subset: Optional subset of slices to use (list of slice_ids)
-        """
-        self.slice_dir = slice_dir
-        self.transform = transform
-        self.num_classes = num_classes
-        self.target_transform = target_transform
-        self.manifest = self._load_manifest()
-        
-        if subset is not None:
-            self.manifest = self.manifest[self.manifest['slice_id'].isin(subset)]
-        
-    def _load_manifest(self):
-        import pandas as pd
-        manifest_path = os.path.join(self.slice_dir, 'slice_manifest.csv')
-        return pd.read_csv(manifest_path)
-    
-    def __len__(self):
-        return len(self.manifest)
-    
-    def __getitem__(self, idx):
-        record = self.manifest.iloc[idx]
-        
-        # Load image and label
-        img = tifffile.imread(os.path.join(self.slice_dir, record['image_path']))
-        label = tifffile.imread(os.path.join(self.slice_dir, record['label_path']))
-        
-        # Apply transforms
-        if self.transform:
-            img = self.transform(img)
-        if self.target_transform:
-            label = self.target_transform(label)
-        
-        # Convert to tensors
-        img_tensor = torch.from_numpy(img).float().unsqueeze(0)  # Add channel dim
-        label_tensor = torch.from_numpy(label).long()
-        
-        img_tensor = (img_tensor - img_tensor.min()) / (img_tensor.max() - img_tensor.min()+1e-4)
-        label_tensor = F.one_hot(label_tensor, num_classes=self.num_classes)
-        label_onehot = label_tensor.permute(2, 0, 1).float()  # (C, H, W)
-        
-        return img_tensor, label_onehot, record['slice_id']
-    
-    def get_volume_ids(self):
-        """Get list of all unique volume IDs"""
-        return sorted(self.manifest['volume_id'].unique())
-    
-    def get_slices_for_volume(self, volume_id):
-        """Get all slices for a specific volume"""
-        return self.manifest[self.manifest['volume_id'] == volume_id]['slice_id'].tolist()
-
-class S8DFinetune2DAP(Dataset):
-    """PyTorch Dataset for loading 2D slices"""
-    
-    def __init__(self, slice_dir, num_classes=5, fixed_length=8194, sths=[0,1,3,5,7], cannys=[50, 100], patch_size=8, transform=None, target_transform=None, subset=None):
-        """
-        Args:
-            slice_dir: Directory containing the slices
-            transform: Transformations for images
-            target_transform: Transformations for labels
-            subset: Optional subset of slices to use (list of slice_ids)
-        """
-        self.slice_dir = slice_dir
-        self.transform = transform
-        self.num_classes = num_classes
-        self.target_transform = target_transform
-        self.manifest = self._load_manifest()
-        self.patch_size = patch_size
-        self.num_channels = 1
-        self.fixed_length = fixed_length
-        self.patchify = ImagePatchify(sths=sths, fixed_length=fixed_length, cannys=cannys, patch_size=patch_size, num_channels=self.num_channels)
-        
-        if subset is not None:
-            self.manifest = self.manifest[self.manifest['slice_id'].isin(subset)]
-        
-    def _load_manifest(self):
-        import pandas as pd
-        manifest_path = os.path.join(self.slice_dir, 'slice_manifest.csv')
-        return pd.read_csv(manifest_path)
-    
-    def __len__(self):
-        return len(self.manifest)
-    
-    def __getitem__(self, idx):
-        record = self.manifest.iloc[idx]
-        
-        # Load image and label
-        img = tifffile.imread(os.path.join(self.slice_dir, record['image_path']))
-        label = tifffile.imread(os.path.join(self.slice_dir, record['label_path']))
-        
-        # Apply transforms
-        if self.transform:
-            img = self.transform(img)
-        if self.target_transform:
-            label = self.target_transform(label)
-        
-        # import pdb;pdb.set_trace()
-        
-        img = (img / 65535 * 255).astype(np.uint8)
-        img = np.expand_dims(img, axis=-1) 
-        seq_img, seq_size, seq_pos, qdt = self.patchify(img)
-        label = np.expand_dims(label, axis=-1) 
-        seq_mask, _, _ = qdt.serialize(label, size=(self.patch_size, self.patch_size, self.num_channels))
-        seq_mask = np.asarray(seq_mask)
-        
-        # seq_mask = np.reshape(seq_mask, [self.patch_size*self.patch_size, -1, self.num_channels])
-        
-        # Convert to tensors
-        seq_img = torch.from_numpy(seq_img).permute(2, 1, 0).float()  # Add channel dim
-        seq_img = (seq_img - seq_img.min()) / (seq_img.max() - seq_img.min()+1e-4)
-        
-        seq_mask = torch.from_numpy(seq_mask).long()
-        seq_mask = seq_mask.view(self.fixed_length, self.patch_size*self.patch_size, self.num_channels)
-        seq_mask = F.one_hot(seq_mask.squeeze(-1), num_classes=self.num_classes)
-        seq_mask = seq_mask.permute(2, 0, 1).float()  # (C, H, W)
-        
-        # Convert to tensors
-        img_tensor = torch.from_numpy(img).float()
-        label_tensor = torch.from_numpy(label).long()
-        
-        img_tensor = (img_tensor - img_tensor.min()) / (img_tensor.max() - img_tensor.min()+1e-4)
-        
-        # dem = qdt.deserialize(seq_mask.permute(1,2,0).numpy(), 8, 5)
-        # dem = np.transpose(dem, (2, 1, 0))
-        # from dataset.utilz import save_input_as_image,save_pred_as_mask
-        # # save_input_as_image(dem, "test_deserialize_pre.png")
-        # save_pred_as_mask(dem, "test_deserialize_pre.png")
-        
-        # Convert seq_size and seq_pos to tensors
-        seq_size = torch.tensor(seq_size, dtype=torch.float32)  # From serialize: seq_size is list of sizes (numbers)
-        seq_pos = torch.tensor(seq_pos, dtype=torch.float32)    # From serialize: seq_pos is list of (x,y) tuples
-
-        return img_tensor, label_tensor, seq_img, seq_mask, [qdt], seq_size, seq_pos
-    
-    def get_volume_ids(self):
-        """Get list of all unique volume IDs"""
-        return sorted(self.manifest['volume_id'].unique())
-    
-    def get_slices_for_volume(self, volume_id):
-        """Get all slices for a specific volume"""
-        return self.manifest[self.manifest['volume_id'] == volume_id]['slice_id'].tolist()
-
-def apt_collate_fn(batch):
     """
-    Custom collate function for S8DFinetune2DAP dataset.
-    Now all sequence elements are tensors and can be stacked.
+    Custom PyTorch Dataset for loading Spring8 .raw image files.
+    Outputs single-channel, normalized tensors.
     """
-    img_tensors, label_tensors, seq_imgs, seq_masks, qdts, seq_sizes, seq_poss = zip(*batch)
+    def __init__(self, data_path, resolution, file_list):
+        self.data_path = data_path
+        self.resolution = resolution
+        self.image_filenames = file_list
+        
+        # Define transformations for single-channel images
+        # NOTE: For best results, calculate the true mean and std of your dataset
+        # and replace the [0.5] values below with the calculated ones.
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            # 例如: transforms.Normalize(mean=[0.123], std=[0.456])
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+
+    def __len__(self):
+        return len(self.image_filenames)
+
+    def __getitem__(self, idx):
+        # Construct the full path to the image file
+        img_path = self.image_filenames[idx]
+        
+        # Load the raw uint16 data and reshape
+        image = np.fromfile(img_path, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
+        
+        # Convert from uint16 (0-65535) to uint8 (0-255) range while preserving dynamic range
+        image = (image / 65535.0 * 255.0).astype(np.uint8)
+        
+        # Apply transforms (ToTensor, Normalize)
+        # The output will be a tensor of shape [1, resolution, resolution]
+        image_tensor = self.transform(image)
+        
+        return image_tensor
+
+def build_s8d_dataloaders(data_dir, batch_size, num_workers, resolution=8192, val_split=0.1):
+    """
+    Builds and returns train and validation DataLoaders for the Spring8Dataset.
+    Handles DDP (Distributed Data Parallel) samplers.
+    """
+    print(f"Building Spring8 dataloaders from directory: {data_dir}")
     
-    return (
-        torch.stack(img_tensors),
-        torch.stack(label_tensors),
-        torch.stack(seq_imgs),
-        torch.stack(seq_masks),
-        [qdt[0] for qdt in qdts],  # List of FixedQuadTree objects
-        torch.stack(seq_sizes),     # Now guaranteed to be stackable
-        torch.stack(seq_poss)       # Now guaranteed to be stackable
+    # Discover all .raw files recursively
+    all_files = []
+    for root, _, files in os.walk(data_dir):
+        for name in files:
+            if name.endswith(".raw"):
+                all_files.append(os.path.join(root, name))
+                
+    if not all_files:
+        raise FileNotFoundError(f"No .raw files found in {data_dir}. Please check the path.")
+
+    print(f"Found {len(all_files)} total .raw image files.")
+
+    # Split the dataset into training and validation sets
+    num_files = len(all_files)
+    num_val = int(num_files * val_split)
+    num_train = num_files - num_val
+
+    # Use a fixed generator for reproducible splits
+    generator = torch.Generator().manual_seed(42)
+    train_files, val_files = random_split(all_files, [num_train, num_val], generator=generator)
+
+    # Create dataset instances
+    train_dataset = Spring8Dataset(data_dir, resolution, list(train_files))
+    val_dataset = Spring8Dataset(data_dir, resolution, list(val_files))
+
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Validation dataset size: {len(val_dataset)}")
+
+    # Create DDP samplers if in a distributed environment
+    is_distributed = 'WORLD_SIZE' in os.environ and int(os.environ['WORLD_SIZE']) > 1
+    train_sampler = DistributedSampler(train_dataset, shuffle=True) if is_distributed else None
+    val_sampler = DistributedSampler(val_dataset, shuffle=False) if is_distributed else None
+
+    # Create DataLoaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=train_sampler,
+        shuffle=(train_sampler is None), # Shuffle only if not using DDP sampler
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        sampler=val_sampler,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False,
     )
     
-if __name__ == "__main__":
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--dataset', default="s8d", 
-    #                     help='base path of dataset.')
-    # parser.add_argument('--data_dir', default="/lustre/orion/nro108/world-shared/enzhi/Riken_XCT_Simulated_Data/8192x8192_2d_Simulations/Noise_0.05_Blur_2_sparsity_2_NumAng_3600", 
-    #                     help='base path of dataset.')
-    # # parser.add_argument('--data_dir', default="/lustre/orion/nro108/world-shared/enzhi/Riken_XCT_Simulated_Data/8192x8192_2d_Simulations/Noise_0.05_Blur_2_sparsity_2_NumAng_3600", 
-    # #                     help='base path of dataset.')
-    # parser.add_argument('--epoch', default=1, type=int,
-    #                     help='Epoch of training.')
-    # parser.add_argument('--batch_size', default=1, type=int,
-    #                     help='Batch_size for training')
-    # args = parser.parse_args()
-    
-    # dataset = S8DFinetune2DAP(args.data_dir, num_classes=5, fixed_length=10201, patch_size=8)
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=apt_collate_fn)
+    return {'train': train_loader, 'val': val_loader}
 
-    # sample_masks = []
-    # seq_masks = []
-    # # Now you can iterate over the dataloader to get batches of images and masks
-    # for batch in dataloader:
-    #     image, mask, qimages, qmasks, qdt = batch
-    #     print(qimages.shape, qmasks.shape)
-    #     dem = qdt.deserialize(qmasks.permute(1,2,0).numpy(), 8, 5)
-    #     dem = np.transpose(dem, (2, 1, 0))
-    #     sample_masks.append()
-    #     seq_masks.append(dem)
-        
-    from tqdm import tqdm
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', default="/work/c30636/dataset/s8d/pretrain", 
-                        help='base path of dataset.')
-    parser.add_argument('--batch_size', default=4, type=int, # 批量保存时可以适当增大batch_size以提高读取效率
-                        help='Batch_size for loading data')
-    parser.add_argument('--output_dir', default="./output_images", type=str,
-                        help='Directory to save the output images.')
+
+# --- Script to calculate dataset statistics ---
+
+class Spring8DatasetForStats(Dataset):
+    """A temporary dataset that only converts images to tensors between [0, 1]."""
+    def __init__(self, all_files, resolution):
+        self.resolution = resolution
+        self.image_filenames = all_files
+        self.transform = transforms.ToTensor() # Only convert to tensor, NO normalization
+
+    def __len__(self):
+        return len(self.image_filenames)
+
+    def __getitem__(self, idx):
+        img_path = self.image_filenames[idx]
+        image = np.fromfile(img_path, dtype=np.uint16).reshape([self.resolution, self.resolution, 1])
+        image = (image / 65535.0 * 255.0).astype(np.uint8)
+        # ToTensor scales uint8 (0-255) to float (0.0-1.0), which is what we need
+        return self.transform(image)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Calculate Mean and Std for S8D Dataset")
+    parser.add_argument('--data_dir', type=str, required=True, help='Path to the S8D dataset directory')
+    parser.add_argument('--num_workers', type=int, default=16, help='Number of workers for DataLoader')
+    parser.add_argument('--batch_size', type=int, default=8, help='Batch size for calculation')
+    parser.add_argument('--resolution', type=int, default=8192, help='Image resolution')
     args = parser.parse_args()
     
-    # 检查数据路径是否存在
-    if not os.path.isdir(args.data_dir):
-        print(f"错误：找不到数据目录 '{args.data_dir}'。请检查路径是否正确。")
-    else:
-        # 1. 创建用于保存图像的输出文件夹
-        os.makedirs(args.output_dir, exist_ok=True)
-        print(f"图像将保存到: {args.output_dir}")
+    print("Discovering all .raw files for statistics calculation...")
+    all_files = []
+    for root, _, files in os.walk(args.data_dir):
+        for name in files:
+            if name.endswith(".raw"):
+                all_files.append(os.path.join(root, name))
 
-        dataset = Spring8Dataset(args.data_dir, resolution=8192)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4) # 可以增加 num_workers 加速数据加载
+    if not all_files:
+        raise FileNotFoundError(f"No .raw files found in {args.data_dir}. Please check the path.")
 
-        # 检查 dataloader 是否为空
-        if len(dataloader) == 0:
-            print("Dataloader 为空，没有图像可以保存。")
-        else:
-            # 2. 遍历整个 DataLoader
-            image_counter = 0
-            # 使用tqdm来包装dataloader，以显示进度条
-            for batch in tqdm(dataloader, desc="正在保存图像"):
-                # batch 的形状是 [batch_size, 1, H, W]
-                
-                # 3. 遍历批次中的每一张图片
-                for i in range(batch.shape[0]):
-                    # 获取单张图片的 tensor
-                    image_tensor = batch[i]
-                    
-                    # 将 tensor 转换为 NumPy 数组 (H, W)
-                    image_to_save = image_tensor.squeeze().cpu().numpy()
-                    
-                    # 4. 定义文件名并保存
-                    # 使用 .zfill(6) 确保文件名按数字顺序排列 (例如: image_000001.png)
-                    filename = f"image_{str(image_counter).zfill(6)}.png"
-                    save_path = os.path.join(args.output_dir, filename)
-                    
-                    # 使用 plt.imsave 直接保存，效率更高
-                    plt.imsave(save_path, image_to_save, cmap='gray')
-                    
-                    image_counter += 1
+    print(f"Found {len(all_files)} files. Creating DataLoader...")
+    
+    # Use the special dataset for calculation
+    stats_dataset = Spring8DatasetForStats(all_files, args.resolution)
+    # No need for a sampler, we want to iterate through all files once
+    stats_loader = DataLoader(
+        stats_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
 
-            print(f"\n处理完成！共保存了 {image_counter} 张图像。")
+    # Calculate mean and std
+    channels_sum = 0.
+    channels_squared_sum = 0.
+    num_pixels = 0
+
+    for images in tqdm(stats_loader, desc="Calculating Mean and Std"):
+        # images shape: [B, C, H, W]
+        # Important: Move to float64 for precision during summation
+        images = images.to(torch.float64)
+        num_pixels += images.size(0) * images.size(2) * images.size(3)
+        channels_sum += torch.sum(images, dim=[0, 2, 3])
+        channels_squared_sum += torch.sum(images**2, dim=[0, 2, 3])
+
+    mean = channels_sum / num_pixels
+    std = (channels_squared_sum / num_pixels - mean ** 2) ** 0.5
+
+    print("\n" + "="*40)
+    print("Calculation Complete!")
+    print(f"  - Total Pixels: {num_pixels}")
+    print(f"  - Mean: {mean.tolist()}")
+    print(f"  - Std:  {std.tolist()}")
+    print("="*40)
+    print("\nPlease copy these Mean and Std values into the transforms.Normalize")
+    print("function in the Spring8Dataset class in dataset/s8d.py")
+
