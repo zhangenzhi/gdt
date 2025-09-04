@@ -53,7 +53,9 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     """
     # --- 1. Denormalize and prepare tensors ---
     # Denormalize using mean=0.5, std=0.5
-    original_img = original_img.cpu().to(torch.float32) * 0.5 + 0.5
+    mean = 0.39012
+    std = 0.298832
+    original_img = original_img.cpu().to(torch.float32) * std + mean
     original_img = torch.clip(original_img, 0, 1)
 
     # Convert to NumPy array (H, W) for plotting
@@ -156,7 +158,7 @@ def pretrain_mae_model(model, train_loader, val_loader, optimizer, scheduler, nu
             
             running_loss += loss.item() * accumulation_steps
             
-            if (i + 1) % 500 == 0 and is_main_process:
+            if (i + 1) % 100 == 0 and is_main_process:
                 with torch.no_grad():
                     loss_val, recon, mask_val = model(images)
                     visualize_and_save(
@@ -215,7 +217,7 @@ def evaluate_mae_model(model, val_loader, device, args, is_ddp=False, epoch=0):
                 total_loss += loss.item() * images.size(0)
                 total_samples += images.size(0)
                 
-                if i < 10 and is_main_process:
+                if i < 10 and is_main_process and epoch%50==0:
                      visualize_and_save(
                         images[0], mask[0], recon[0], 
                         args.patch_size, loss.item(), i,
