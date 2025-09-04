@@ -49,7 +49,7 @@ class MAEEncoder(nn.Module):
         x = x + self.pos_embed[:, 1:, :]
 
         # 2. Select only the visible patches (the core MAE logic)
-        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(--1, -1, x.shape[-1]))
+        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
 
         # 3. Prepend the CLS token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
