@@ -315,7 +315,7 @@ def mae_pretrain_ddp(args, config): # <--- MODIFIED: Renamed function
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAE S8D Pre-training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/mae-vit-b16_S8D.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/mae-vit-b128_S8D.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='mae_s8d_pretrain', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae_vit-p128-s8d', help='Subdirectory for saving logs and models')
