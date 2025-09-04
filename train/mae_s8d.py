@@ -53,8 +53,8 @@ def visualize_and_save(original_img, mask, recon_patches, patch_size, loss, step
     """
     # --- 1. Denormalize and prepare tensors ---
     # Denormalize using mean=0.5, std=0.5
-    mean = 0.39012
-    std = 0.298832
+    mean = 0.390480
+    std = 0.29985
     original_img = original_img.cpu().to(torch.float32) * std + mean
     original_img = torch.clip(original_img, 0, 1)
 

@@ -32,7 +32,7 @@ class Spring8Dataset(Dataset):
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             # 例如: transforms.Normalize(mean=[0.123], std=[0.456])
-            transforms.Normalize(mean=[0.39012], std=[0.298832])
+            transforms.Normalize(mean=[0.390480], std=[0.298832])
         ])
 
     def __len__(self):
