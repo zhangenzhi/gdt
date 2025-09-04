@@ -208,12 +208,6 @@ def vit_imagenet_train(args, config):
     num_workers=args.num_workers)
 
     model = create_vit_model(config)
-    
-    checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
-    if args.reload and os.path.exists(checkpoint_path):
-        logging.info(f"Reloading model from {checkpoint_path}")
-        map_location = {'cuda:0': f'cuda:{device_id}'}
-        model.load_state_dict(torch.load(checkpoint_path, map_location=map_location))
         
     model.to(device_id)
     model = DDP(model, device_ids=[device_id])
