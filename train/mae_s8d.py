@@ -17,9 +17,8 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 sys.path.append("./")
-# from model.mae import MAE
+
 from model.timm_mae import MAE
-# <--- MODIFIED: Import our new S8D dataloader builder instead of the ImageNet one
 from dataset.s8d import build_s8d_dataloaders
 from dataset.utlis import param_groups_lrd
 
@@ -281,7 +280,7 @@ def mae_pretrain_ddp(args, config): # <--- MODIFIED: Renamed function
     optimizer = torch.optim.AdamW(
         param_groups,
         lr=config['training']['learning_rate'], 
-        betas=tuple(config['training'].get('betas', (0.9, 0.95)))
+        betas=tuple(config['training'].get('betas', (0.9, 0.99)))
     )
     
     training_config = config['training']
