@@ -276,11 +276,10 @@ def mae_pretrain_ddp(args, config): # <--- MODIFIED: Renamed function
         
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     
-    param_groups = param_groups_lrd(model.module, config['training']['weight_decay'], layer_decay=0.75)
     optimizer = torch.optim.AdamW(
-        param_groups,
+        model.parameters(),
         lr=config['training']['learning_rate'], 
-        betas=tuple(config['training'].get('betas', (0.9, 0.99)))
+        betas=tuple(config['training'].get('betas', (0.9, 0.95)))
     )
     
     training_config = config['training']
