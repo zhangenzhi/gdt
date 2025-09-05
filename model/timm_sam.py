@@ -148,20 +148,19 @@ class SAMLikeModel(nn.Module):
         print("加载 ViT backbone 的消息:", msg)
 
 # ================================================================= #
-#                   单文件测试模块 (Single File Test)                  #
+#          单文件测试模块 (Single File Test - Forward & Backward)       #
 # ================================================================= #
 if __name__ == '__main__':
-    print("--- [测试] SAM-like 模型单文件 ---")
+    print("--- [测试] SAM-like 模型单文件 (前向 + 后向传播) ---")
 
     # 1. 模拟您的配置文件 (config)
     mock_config = {
         'model': {
             'img_size': 8192,
-            'patch_size': 128,    # 根据您的 MAE 预训练设置
-            'in_channels': 1,     # 单通道灰度图
+            'patch_size': 128,
+            'in_channels': 1,
             'encoder_embed_dim': 768,
             'decoder_embed_dim': 512,
-            # 其他 encoder/decoder 参数, 模型初始化时会用到
             'encoder_depth': 12,
             'encoder_heads': 12,
             'decoder_depth': 8,
@@ -170,48 +169,63 @@ if __name__ == '__main__':
     }
     
     # 2. 设置模型参数
-    NUM_CLASSES = 5 # 您指定的类别数
-    BATCH_SIZE = 1  # 测试时通常用1
+    NUM_CLASSES = 5
+    BATCH_SIZE = 1
     IMG_SIZE = mock_config['model']['img_size']
     
     # 3. 实例化模型
-    # 将模型移动到GPU（如果可用），否则使用CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SAMLikeModel(config=mock_config, num_classes=NUM_CLASSES).to(device)
-    model.eval() # 设置为评估模式
+    # model.train() # 设置为训练模式以计算梯度
     
     print(f"模型已成功实例化并移至: {device}")
     
     # 4. 创建模拟输入数据
-    # a. 模拟图像: [B, C, H, W]
     mock_image = torch.randn(BATCH_SIZE, 1, IMG_SIZE, IMG_SIZE).to(device)
-    
-    # b. 模拟提示: 一个前景点 (坐标 + 标签)
-    #    - 坐标: [B, Num_points, 2] (x, y)
-    #    - 标签: [B, Num_points] (1 通常代表前景点)
     mock_points = torch.randint(0, IMG_SIZE, (BATCH_SIZE, 1, 2), device=device).float()
     mock_labels = torch.ones(BATCH_SIZE, 1, device=device).long()
+    
+    # a. 创建模拟的目标掩码 (Ground Truth Mask)
+    # 目标掩码的 shape 是 [B, H, W]，数据类型是 Long
+    mock_target_mask = torch.randint(0, NUM_CLASSES, (BATCH_SIZE, IMG_SIZE, IMG_SIZE), device=device).long()
 
     print("\n--- 输入数据尺寸 ---")
-    print(f"图像 (Image):  {mock_image.shape}")
-    print(f"点坐标 (Points): {mock_points.shape}")
-    print(f"点标签 (Labels): {mock_labels.shape}")
+    print(f"图像 (Image):        {mock_image.shape}")
+    print(f"点坐标 (Points):     {mock_points.shape}")
+    print(f"点标签 (Labels):     {mock_labels.shape}")
+    print(f"目标掩码 (Target Mask): {mock_target_mask.shape}")
 
-    # 5. 执行前向传播
-    with torch.no_grad(): # 测试时不需要计算梯度
-        try:
-            predicted_masks = model(mock_image, mock_points, mock_labels)
-            print("\n--- 前向传播成功 ---")
-            print(f"输出掩码 (Predicted Masks) 尺寸: {predicted_masks.shape}")
-            
-            # 验证输出尺寸是否符合预期
-            expected_shape = (BATCH_SIZE, NUM_CLASSES, IMG_SIZE, IMG_SIZE)
-            assert predicted_masks.shape == expected_shape, \
-                f"输出尺寸错误！预期: {expected_shape}, 得到: {predicted_masks.shape}"
-            
-            print("\n✅ 测试通过: 输出尺寸符合预期！")
+    # 5. 执行前向和后向传播
+    try:
+        # --- 前向传播 ---
+        predicted_masks = model(mock_image, mock_points, mock_labels)
+        print("\n--- 前向传播成功 ---")
+        print(f"输出掩码 (Predicted Masks) 尺寸: {predicted_masks.shape}")
+        
+        expected_shape = (BATCH_SIZE, NUM_CLASSES, IMG_SIZE, IMG_SIZE)
+        assert predicted_masks.shape == expected_shape, "输出尺寸错误！"
 
-        except Exception as e:
-            print(f"\n❌ 测试失败: 前向传播时发生错误。")
-            print(f"错误信息: {e}")
+        # --- 计算损失 ---
+        loss_fn = nn.CrossEntropyLoss()
+        loss = loss_fn(predicted_masks, mock_target_mask)
+        print(f"计算损失 (Loss): {loss.item():.4f}")
+
+        # --- 后向传播 ---
+        loss.backward()
+        print("\n--- 后向传播成功 ---")
+
+        # --- 验证梯度 ---
+        # 检查模型中某个参数的梯度是否存在且不为0
+        grad_check_param = model.image_encoder.patch_embed.proj.weight.grad
+        assert grad_check_param is not None, "梯度为 None！后向传播失败。"
+        assert grad_check_param.abs().sum() > 0, "梯度全为0！后向传播可能存在问题。"
+        print("梯度已成功计算并回传至模型参数。")
+        
+        print("\n✅ 测试通过: 前向和后向传播均正常工作！")
+
+    except Exception as e:
+        import traceback
+        print(f"\n❌ 测试失败: 传播过程中发生错误。")
+        print(f"错误信息: {e}")
+        traceback.print_exc()
 
