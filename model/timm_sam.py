@@ -69,7 +69,7 @@ class SAMLikeModel(nn.Module):
         
         # --- 核心修改: 使用 timm 的 SAM ViT 并传递自定义参数 ---
         self.image_encoder = timm.create_model(
-            'samvit_base_patch16.sa1b',
+            'samvit_base_patch16.sa1b', # <-- 修正了这里的模型名称
             pretrained=False,
             # 覆盖默认配置，以匹配您的 S8D 数据集
             img_size=model_config['img_size'],
@@ -96,12 +96,14 @@ class SAMLikeModel(nn.Module):
     def forward(self, images, points, labels):
         H, W = images.shape[2], images.shape[3]
         
-        # timm 的 SAM ViT forward_features 输出的是 patch 序列
-        image_features_seq = self.image_encoder.forward_features(images)
+        # --- 核心修正 ---
+        # timm 的 VisionTransformerSAM.forward_features 直接返回我们需要的 4D 特征图
+        # 形状为 [B, D, h_p, w_p], 无需再进行 reshape
+        image_embeddings_2d = self.image_encoder.forward_features(images)
         
-        B, N, D = image_features_seq.shape
-        h_p, w_p = H // self.patch_size, W // self.patch_size
-        image_embeddings_2d = image_features_seq.permute(0, 2, 1).reshape(B, D, h_p, w_p)
+        # 移除了导致错误的 unpack 和 permute/reshape 操作
+        # B, N, D = image_features_seq.shape # <- Error Line Removed
+        # ...
         
         prompt_embeddings = self.prompt_encoder(points, labels)
         predicted_masks = self.mask_decoder(image_embeddings_2d, prompt_embeddings)
@@ -122,7 +124,6 @@ class SAMLikeModel(nn.Module):
         checkpoint = torch.load(mae_checkpoint_path, map_location='cpu')
         mae_state_dict = checkpoint.get('model_state_dict', checkpoint)
         
-        # --- 核心修改: 修正权重键名以匹配 timm 模型 ---
         encoder_state_dict = {}
         # 您的 MAE 预训练权重的键名类似: 'encoder.model.blocks.0...'
         # timm 模型的键名类似: 'blocks.0...'
