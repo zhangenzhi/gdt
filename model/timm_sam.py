@@ -69,7 +69,7 @@ class SAMLikeModel(nn.Module):
         
         # --- 核心修改: 使用 timm 的 SAM ViT 并传递自定义参数 ---
         self.image_encoder = timm.create_model(
-            'vit_base_patch16_sam',
+            'samvit_base_patch16.sa1b',
             pretrained=False,
             # 覆盖默认配置，以匹配您的 S8D 数据集
             img_size=model_config['img_size'],
