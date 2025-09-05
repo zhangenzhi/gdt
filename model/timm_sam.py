@@ -43,7 +43,6 @@ class MaskDecoder(nn.Module):
             nn.ConvTranspose2d(encoder_dim // 8, num_classes, kernel_size=1)
         )
         self.blocks = nn.ModuleList([
-            # 关键修正：确保 Block 也使用正确的 encoder_dim
             Block(dim=encoder_dim, num_heads=8, mlp_ratio=4., qkv_bias=True, norm_layer=nn.LayerNorm)
             for _ in range(2)
         ])
@@ -51,9 +50,21 @@ class MaskDecoder(nn.Module):
     def forward(self, image_embeddings, prompt_embeddings):
         prompt_embed = prompt_embeddings[:, 0, :].unsqueeze(-1).unsqueeze(-1)
         fused_features = image_embeddings + prompt_embed
+        
+        # --- 核心修正 ---
+        # 1. 将 4D 特征图 reshape 为 3D 序列以输入 Transformer Block
+        B, C, H, W = fused_features.shape
+        fused_features_seq = fused_features.flatten(2).transpose(1, 2) # Shape: [B, H*W, C]
+        
+        # 2. 通过 Transformer blocks 处理序列
         for blk in self.blocks:
-            fused_features = blk(fused_features)
-        upscaled_masks = self.output_upscaling(fused_features)
+            fused_features_seq = blk(fused_features_seq)
+            
+        # 3. 将处理后的序列 reshape 回 4D 特征图
+        processed_features = fused_features_seq.transpose(1, 2).view(B, C, H, W)
+        
+        # 4. 使用 4D 特征图进行上采样
+        upscaled_masks = self.output_upscaling(processed_features)
         return upscaled_masks
 
 class SAMLikeModel(nn.Module):
@@ -76,7 +87,6 @@ class SAMLikeModel(nn.Module):
             num_heads=model_config['encoder_heads'],
         )
         
-        # --- 核心修正 ---
         # 获取 image_encoder 输出的真实特征维度 (对于 samvit 是 256)
         encoder_output_dim = self.image_encoder.num_features
         
