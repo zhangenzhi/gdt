@@ -32,13 +32,10 @@ class MaskDecoder(nn.Module):
         super().__init__()
         self.patch_size = patch_size
         
-        # 两个 2x 的上采样会将 patch_size / 2 / 2 = patch_size / 4
-        # 例如 128 -> 32
         final_norm_size = patch_size // 4
         
         self.output_upscaling = nn.Sequential(
             nn.ConvTranspose2d(encoder_dim, encoder_dim // 4, kernel_size=2, stride=2),
-            # 关键修正：动态计算 LayerNorm 的尺寸，使其更具鲁棒性
             nn.LayerNorm([encoder_dim // 4, final_norm_size, final_norm_size]),
             nn.GELU(),
             nn.ConvTranspose2d(encoder_dim // 4, encoder_dim // 8, kernel_size=2, stride=2),
@@ -46,6 +43,7 @@ class MaskDecoder(nn.Module):
             nn.ConvTranspose2d(encoder_dim // 8, num_classes, kernel_size=1)
         )
         self.blocks = nn.ModuleList([
+            # 关键修正：确保 Block 也使用正确的 encoder_dim
             Block(dim=encoder_dim, num_heads=8, mlp_ratio=4., qkv_bias=True, norm_layer=nn.LayerNorm)
             for _ in range(2)
         ])
@@ -67,27 +65,26 @@ class SAMLikeModel(nn.Module):
         model_config = config['model']
         self.patch_size = model_config['patch_size']
         
-        # --- 核心修改: 使用 timm 的 SAM ViT 并传递自定义参数 ---
         self.image_encoder = timm.create_model(
-            'samvit_base_patch16.sa1b', # <-- 修正了这里的模型名称
+            'samvit_base_patch16.sa1b',
             pretrained=False,
-            # 覆盖默认配置，以匹配您的 S8D 数据集
             img_size=model_config['img_size'],
             patch_size=model_config['patch_size'],
             in_chans=model_config['in_channels'],
-            # SAM ViT 内部参数，最好与您的 MAE 预训练保持一致
             embed_dim=model_config['encoder_embed_dim'],
             depth=model_config['encoder_depth'],
             num_heads=model_config['encoder_heads'],
-            # SAM ViT 默认没有分类头 (num_classes=0)，正好符合我们的需求
         )
         
-        encoder_dim = self.image_encoder.embed_dim
+        # --- 核心修正 ---
+        # 获取 image_encoder 输出的真实特征维度 (对于 samvit 是 256)
+        encoder_output_dim = self.image_encoder.num_features
         
-        self.prompt_encoder = PromptEncoder(embed_dim=encoder_dim)
+        # 使用正确的输出维度来初始化 prompt_encoder 和 mask_decoder
+        self.prompt_encoder = PromptEncoder(embed_dim=encoder_output_dim)
         
         self.mask_decoder = MaskDecoder(
-            encoder_dim=encoder_dim,
+            encoder_dim=encoder_output_dim,
             decoder_dim=model_config['decoder_embed_dim'],
             num_classes=num_classes,
             patch_size=self.patch_size
@@ -96,14 +93,7 @@ class SAMLikeModel(nn.Module):
     def forward(self, images, points, labels):
         H, W = images.shape[2], images.shape[3]
         
-        # --- 核心修正 ---
-        # timm 的 VisionTransformerSAM.forward_features 直接返回我们需要的 4D 特征图
-        # 形状为 [B, D, h_p, w_p], 无需再进行 reshape
         image_embeddings_2d = self.image_encoder.forward_features(images)
-        
-        # 移除了导致错误的 unpack 和 permute/reshape 操作
-        # B, N, D = image_features_seq.shape # <- Error Line Removed
-        # ...
         
         prompt_embeddings = self.prompt_encoder(points, labels)
         predicted_masks = self.mask_decoder(image_embeddings_2d, prompt_embeddings)
@@ -125,9 +115,6 @@ class SAMLikeModel(nn.Module):
         mae_state_dict = checkpoint.get('model_state_dict', checkpoint)
         
         encoder_state_dict = {}
-        # 您的 MAE 预训练权重的键名类似: 'encoder.model.blocks.0...'
-        # timm 模型的键名类似: 'blocks.0...'
-        # 因此，我们需要剥离 'encoder.model.' 前缀
         prefix_to_strip = 'encoder.model.'
         
         for k, v in mae_state_dict.items():
