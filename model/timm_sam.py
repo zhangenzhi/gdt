@@ -28,15 +28,21 @@ class MaskDecoder(nn.Module):
     """
     一个简化的掩码解码器。
     """
-    def __init__(self, encoder_dim, decoder_dim, num_classes, patch_size):
+    def __init__(self, encoder_dim, decoder_dim, num_classes, patch_size, img_size):
         super().__init__()
         self.patch_size = patch_size
         
-        final_norm_size = patch_size // 4
+        # --- 核心修正 ---
+        # 动态计算 LayerNorm 所需的 H 和 W 维度
+        # 1. 计算 Encoder 输出的特征图网格大小
+        grid_size = img_size // patch_size
+        # 2. 第一次 ConvTranspose2d (stride=2) 后，网格大小翻倍
+        upsampled_grid_size = grid_size * 2
         
         self.output_upscaling = nn.Sequential(
             nn.ConvTranspose2d(encoder_dim, encoder_dim // 4, kernel_size=2, stride=2),
-            nn.LayerNorm([encoder_dim // 4, final_norm_size, final_norm_size]),
+            # 使用动态计算出的正确尺寸
+            nn.LayerNorm([encoder_dim // 4, upsampled_grid_size, upsampled_grid_size]),
             nn.GELU(),
             nn.ConvTranspose2d(encoder_dim // 4, encoder_dim // 8, kernel_size=2, stride=2),
             nn.GELU(),
@@ -51,19 +57,14 @@ class MaskDecoder(nn.Module):
         prompt_embed = prompt_embeddings[:, 0, :].unsqueeze(-1).unsqueeze(-1)
         fused_features = image_embeddings + prompt_embed
         
-        # --- 核心修正 ---
-        # 1. 将 4D 特征图 reshape 为 3D 序列以输入 Transformer Block
         B, C, H, W = fused_features.shape
         fused_features_seq = fused_features.flatten(2).transpose(1, 2) # Shape: [B, H*W, C]
         
-        # 2. 通过 Transformer blocks 处理序列
         for blk in self.blocks:
             fused_features_seq = blk(fused_features_seq)
             
-        # 3. 将处理后的序列 reshape 回 4D 特征图
         processed_features = fused_features_seq.transpose(1, 2).view(B, C, H, W)
         
-        # 4. 使用 4D 特征图进行上采样
         upscaled_masks = self.output_upscaling(processed_features)
         return upscaled_masks
 
@@ -75,29 +76,29 @@ class SAMLikeModel(nn.Module):
         super().__init__()
         model_config = config['model']
         self.patch_size = model_config['patch_size']
+        self.img_size = model_config['img_size']
         
         self.image_encoder = timm.create_model(
             'samvit_base_patch16.sa1b',
             pretrained=False,
-            img_size=model_config['img_size'],
-            patch_size=model_config['patch_size'],
+            img_size=self.img_size,
+            patch_size=self.patch_size,
             in_chans=model_config['in_channels'],
             embed_dim=model_config['encoder_embed_dim'],
             depth=model_config['encoder_depth'],
             num_heads=model_config['encoder_heads'],
         )
         
-        # 获取 image_encoder 输出的真实特征维度 (对于 samvit 是 256)
         encoder_output_dim = self.image_encoder.num_features
         
-        # 使用正确的输出维度来初始化 prompt_encoder 和 mask_decoder
         self.prompt_encoder = PromptEncoder(embed_dim=encoder_output_dim)
         
         self.mask_decoder = MaskDecoder(
             encoder_dim=encoder_output_dim,
             decoder_dim=model_config['decoder_embed_dim'],
             num_classes=num_classes,
-            patch_size=self.patch_size
+            patch_size=self.patch_size,
+            img_size=self.img_size # <-- 将 img_size 传递给解码器
         )
 
     def forward(self, images, points, labels):
