@@ -1,0 +1,31 @@
+# 1. 模型配置
+model:
+  num_classes: 5 # 您的 S8D 数据集分割类别数
+  # SAMLikeModel 会从 MAE 的 config 中获取 encoder 参数，这里无需重复
+
+# 2. 数据配置
+data:
+  img_size: 8192 # 输入图像尺寸
+  # 这里可以添加数据增强等配置...
+
+# 3. 训练超参数
+training:
+  optimizer: "AdamW"
+  
+  # --- 差分学习率 ---
+  # 为已经预训练好的 Encoder 设置一个较小的学习率
+  encoder_lr: 0.00001
+  # 为随机初始化的 Decoder 和 PromptEncoder 设置一个较大的学习率
+  decoder_lr: 0.001 
+  
+  betas: [0.9, 0.999]
+  weight_decay: 0.05
+  
+  # 学习率调度器
+  scheduler: "CosineAnnealing"
+  warmup_epochs: 5
+  num_epochs: 100
+  batch_size: 1 # 对于 8192x8192 的图像，batch_size 通常很小
+
+  # 是否使用 torch.compile 优化
+  use_compile: false
