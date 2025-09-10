@@ -1,10 +1,12 @@
 import argparse
 import torch
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import DataLoader, Sampler, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
 import os
+import cv2
+import numpy as np
 import random
 import shutil
 from tqdm import tqdm
@@ -122,6 +124,178 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
         ),
         'val': DataLoader(
             image_datasets['val'],
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            sampler=samplers['val']
+        )
+    }
+    
+    return dataloaders
+
+
+from gdt.hde import HDEProcessor, Rect, FixedQuadTree
+
+def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """
+    Converts a PyTorch tensor (normalized, CHW) to a NumPy array (HWC, uint8)
+    that can be used by OpenCV.
+    """
+    # 1. Reverse the normalization
+    inv_normalize = transforms.Normalize(
+        mean=[-m/s for m, s in zip(mean, std)],
+        std=[1/s for s in std]
+    )
+    tensor = inv_normalize(tensor)
+    
+    # 2. Convert from CHW to HWC format
+    numpy_img = tensor.permute(1, 2, 0).numpy()
+    
+    # 3. Denormalize from [0, 1] to [0, 255] and convert to uint8
+    numpy_img = (numpy_img * 255).astype(np.uint8)
+    
+    # 4. Convert RGB to BGR for OpenCV
+    bgr_img = cv2.cvtColor(numpy_img, cv2.COLOR_RGB2BGR)
+    
+    return bgr_img
+
+# --- Custom PyTorch Dataset for HDE ---
+
+class HDEDataset(Dataset):
+    """
+    A custom PyTorch Dataset that wraps an existing image dataset (e.g., ImageNet).
+    For each image, it performs the full HDE preprocessing pipeline:
+    1. Converts the tensor image to a NumPy array.
+    2. Applies Canny edge detection.
+    3. Builds an adaptive quadtree.
+    4. Generates a mixed sequence of clean and noised patches using HDEProcessor.
+    5. Serializes the patches and metadata into tensors for the model.
+    """
+    def __init__(self, underlying_dataset, fixed_length=512, patch_size=16, visible_fraction=0.25):
+        self.underlying_dataset = underlying_dataset
+        self.fixed_length = fixed_length
+        self.patch_size = patch_size
+        self.hde_processor = HDEProcessor(visible_fraction=visible_fraction)
+        
+        # For randomizing Canny edge detection
+        self.canny_thresholds = list(range(50, 151, 10))
+
+    def __len__(self):
+        return len(self.underlying_dataset)
+
+    def __getitem__(self, idx):
+        # 1. Get the original, transformed image tensor from the base dataset
+        img_tensor, target_label = self.underlying_dataset[idx]
+        
+        # 2. Convert tensor back to a CV2-compatible NumPy image
+        img_np = tensor_to_cv2_img(img_tensor)
+
+        # 3. Perform edge detection
+        gray_img = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+        t1 = random.choice(self.canny_thresholds)
+        t2 = t1 * 2
+        edges = cv2.Canny(gray_img, t1, t2)
+        
+        # 4. Build the adaptive quadtree
+        qdt = FixedQuadTree(domain=edges, fixed_length=self.fixed_length)
+        
+        # 5. Generate the sequence of clean and noised patches
+        patch_sequence, noised_mask = self.hde_processor.create_training_sequence(img_np, qdt)
+        
+        # 6. Serialize the output for the model
+        num_channels = img_np.shape[2]
+        
+        # Pre-allocate arrays
+        final_patches = np.zeros((self.fixed_length, self.patch_size, self.patch_size, num_channels), dtype=np.float32)
+        seq_size = np.zeros(self.fixed_length, dtype=np.int32)
+        seq_pos = np.zeros((self.fixed_length, 2), dtype=np.float32)
+
+        leaf_nodes = [node for node, value in qdt.nodes]
+        for i, patch in enumerate(patch_sequence):
+            # Resize patch to the fixed size expected by the ViT
+            resized_patch = cv2.resize(patch, (self.patch_size, self.patch_size), interpolation=cv2.INTER_CUBIC)
+            final_patches[i] = resized_patch.astype(np.float32)
+            
+            # Get metadata
+            bbox = leaf_nodes[i]
+            size, _ = bbox.get_size()
+            seq_size[i] = size
+            
+            x_center = (bbox.x1 + bbox.x2) / 2
+            y_center = (bbox.y1 + bbox.y2) / 2
+            seq_pos[i] = [x_center, y_center]
+            
+        # 7. Convert everything to PyTorch Tensors
+        # Normalize patches from [0, 255] to [0, 1] and convert from HWC to CHW
+        patches_tensor = torch.from_numpy(final_patches).permute(0, 3, 1, 2) / 255.0
+        
+        # Apply standard normalization
+        normalize_output = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        patches_tensor = normalize_output(patches_tensor)
+
+        return {
+            "patches": patches_tensor,
+            "sizes": torch.from_numpy(seq_size),
+            "positions": torch.from_numpy(seq_pos),
+            "mask": torch.from_numpy(noised_mask),
+            "target": target_label,
+            "original_image": img_tensor # Return for visualization/debugging if needed
+        }
+        
+#  --- Dataloader Builder Function for HDE ---
+
+def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=512, patch_size=16, num_workers=32):
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    # Standard data augmentation for the base images
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(img_size, scale=(0.2, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
+    
+    transform_val = transforms.Compose([
+        transforms.Resize(img_size, interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
+
+    # 1. Create the base ImageNet datasets
+    print("Loading base ImageNet datasets...")
+    # 注意: 代码现在默认使用 ImageNet 数据集。
+    # 如果想在没有完整数据集的情况下进行快速测试，请注释掉下面这行代码，
+    # 并取消 'FakeData' 部分的注释。
+    base_image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=transform_train if x == 'train' else transform_val) for x in ['train', 'val']}
+    
+    # 使用 FakeData 进行可运行的示例 - 为了使用 ImageNet 已被注释掉
+    # base_image_datasets = {
+    #     'train': datasets.FakeData(size=1000, image_size=(3, img_size, img_size), transform=transform_train),
+    #     'val': datasets.FakeData(size=100, image_size=(3, img_size, img_size), transform=transform_val)
+    # }
+    print("Base datasets loaded.")
+    
+    # 2. Wrap them with our custom HDEDataset
+    print("Wrapping with HDEDataset...")
+    hde_datasets = {x: HDEDataset(base_image_datasets[x], fixed_length=fixed_length, patch_size=patch_size) for x in ['train', 'val']}
+    print("HDEDatasets created.")
+
+    # 3. Create samplers and dataloaders
+    samplers = {x: DistributedSampler(hde_datasets[x], shuffle=True) for x in ['train', 'val']}
+    
+    dataloaders = {
+        'train': DataLoader(
+            hde_datasets['train'],
+            batch_size=batch_size,
+            num_workers=num_workers,     
+            pin_memory=True,              
+            sampler=samplers['train'],
+            drop_last=True                
+        ),
+        'val': DataLoader(
+            hde_datasets['val'],
             batch_size=batch_size,
             num_workers=num_workers,
             pin_memory=True,
@@ -280,58 +454,58 @@ def imagenet_iter(args):
 
 #     print("Time cost for loading {}".format(time.time() - start_time))
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
-    # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
-    # parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
-    parser.add_argument('--output_dir', type=str, default="/work/c30636/gdt/dataset", help="Path to save the generated subset.")
-    parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
-    parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
-    parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
+#     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
+#     # parser.add_argument('--output_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help="Path to save the generated subset.")
+#     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help="Path to the original ImageNet directory containing 'train' and 'val' folders.")
+#     parser.add_argument('--output_dir', type=str, default="/work/c30636/gdt/dataset", help="Path to save the generated subset.")
+#     parser.add_argument('--num_classes', type=int, default=10, help="Number of classes to include in the subset.")
+#     parser.add_argument('--train_imgs', type=int, default=500, help="Number of training images per class.")
+#     parser.add_argument('--val_imgs', type=int, default=100, help="Number of validation images per class.")
     
-    args = parser.parse_args()
+#     args = parser.parse_args()
 
-    # --- Create Training Subset ---
-    print("--- Starting Training Subset Creation ---")
-    original_train_dir = os.path.join(args.data_dir, 'train')
-    subset_train_dir = os.path.join(args.output_dir, 'train')
-    create_imagenet_subset(original_train_dir, subset_train_dir, args.num_classes, args.train_imgs)
+#     # --- Create Training Subset ---
+#     print("--- Starting Training Subset Creation ---")
+#     original_train_dir = os.path.join(args.data_dir, 'train')
+#     subset_train_dir = os.path.join(args.output_dir, 'train')
+#     create_imagenet_subset(original_train_dir, subset_train_dir, args.num_classes, args.train_imgs)
 
-    # --- Create Validation Subset from the same classes ---
-    print("\n--- Starting Validation Subset Creation ---")
-    # Get the classes selected for the training set to ensure consistency
-    selected_train_classes = os.listdir(subset_train_dir)
-    original_val_dir = os.path.join(args.data_dir, 'val')
-    subset_val_dir = os.path.join(args.output_dir, 'val')
+#     # --- Create Validation Subset from the same classes ---
+#     print("\n--- Starting Validation Subset Creation ---")
+#     # Get the classes selected for the training set to ensure consistency
+#     selected_train_classes = os.listdir(subset_train_dir)
+#     original_val_dir = os.path.join(args.data_dir, 'val')
+#     subset_val_dir = os.path.join(args.output_dir, 'val')
     
-    if os.path.exists(subset_val_dir):
-        shutil.rmtree(subset_val_dir)
-    os.makedirs(subset_val_dir)
+#     if os.path.exists(subset_val_dir):
+#         shutil.rmtree(subset_val_dir)
+#     os.makedirs(subset_val_dir)
     
-    for class_name in tqdm(selected_train_classes, desc="Processing validation classes"):
-        subset_class_dir = os.path.join(subset_val_dir, class_name)
-        os.makedirs(subset_class_dir)
+#     for class_name in tqdm(selected_train_classes, desc="Processing validation classes"):
+#         subset_class_dir = os.path.join(subset_val_dir, class_name)
+#         os.makedirs(subset_class_dir)
         
-        original_class_dir = os.path.join(original_val_dir, class_name)
-        if not os.path.isdir(original_class_dir):
-            # print(f"Warning: Class '{class_name}' not found in validation set. Skipping.")
-            continue
+#         original_class_dir = os.path.join(original_val_dir, class_name)
+#         if not os.path.isdir(original_class_dir):
+#             # print(f"Warning: Class '{class_name}' not found in validation set. Skipping.")
+#             continue
             
-        class_images = [f for f in os.listdir(original_class_dir) if os.path.isfile(os.path.join(original_class_dir, f))]
-        k_images = min(args.val_imgs, len(class_images))
-        if k_images == 0:
-            continue
+#         class_images = [f for f in os.listdir(original_class_dir) if os.path.isfile(os.path.join(original_class_dir, f))]
+#         k_images = min(args.val_imgs, len(class_images))
+#         if k_images == 0:
+#             continue
         
-        selected_images = random.sample(class_images, k=k_images)
+#         selected_images = random.sample(class_images, k=k_images)
         
-        for image_name in selected_images:
-            original_image_path = os.path.join(original_class_dir, image_name)
-            subset_image_path = os.path.join(subset_class_dir, image_name)
-            shutil.copy(original_image_path, subset_image_path)
+#         for image_name in selected_images:
+#             original_image_path = os.path.join(original_class_dir, image_name)
+#             subset_image_path = os.path.join(subset_class_dir, image_name)
+#             shutil.copy(original_image_path, subset_image_path)
             
-    print("\nValidation subset creation completed.")
-    print("Subset creation finished. Find your data at:", args.output_dir)
+#     print("\nValidation subset creation completed.")
+#     print("Subset creation finished. Find your data at:", args.output_dir)
     
 # if __name__ == '__main__':
 #     # --- Example Usage ---
@@ -355,4 +529,50 @@ if __name__ == '__main__':
 #         # The labels are indices. You can map them back to class names (folder names)
 #         print(f"Corresponding class names: {[class_names[i] for i in classes[:5]]}")
 
+if __name__ == '__main__':
+    # This block will only run when the script is executed directly.
+    # It demonstrates how to iterate through the entire dataset.
+    # NOTE: This is a single-process example. For multi-GPU training,
+    # you would need to initialize torch.distributed.
+    import time
+    parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader Example')
+    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--num_epochs', type=int, default=1, help='Epochs for iteration')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
+    parser.add_argument('--img_size', type=int, default=224, help='Image size')
+    parser.add_argument('--fixed_length', type=int, default=196, help='Number of patches (sequence length)')
+    parser.add_argument('--patch_size', type=int, default=16, help='Size of each patch after resizing')
 
+    args = parser.parse_args()
+    
+    print("Building HDE ImageNet dataloaders...")
+    dataloaders = build_hde_imagenet_dataloaders(
+        img_size=args.img_size,
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,
+        fixed_length=args.fixed_length,
+        patch_size=args.patch_size,
+        num_workers=args.num_workers
+    )
+    
+    print("Dataloaders built. Starting iteration...")
+    start_time = time.time()
+    
+    for epoch in range(args.num_epochs):
+        print(f"\n--- Epoch {epoch+1}/{args.num_epochs} ---")
+        for phase in ['train', 'val']:
+            print(f"\nIterating over {phase} set...")
+            for step, batch in enumerate(dataloaders[phase]):
+                # Our dataloader yields a dictionary
+                inputs = batch['patches']
+                labels = batch['target']
+                
+                if step % 100 == 0:
+                    # To verify, you can print out the types and shapes
+                    print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+            
+            print(f"Finished iterating over {phase} set.")
+
+    total_time = time.time() - start_time
+    print(f"\nTotal time cost for loading {args.num_epochs} epoch(s): {total_time:.2f} seconds")
