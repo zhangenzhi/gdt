@@ -3,6 +3,7 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Sampler, Dataset
 from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 
 import os
 import cv2
@@ -267,15 +268,7 @@ def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=
     # 1. Create the base ImageNet datasets
     print("Loading base ImageNet datasets...")
     # 注意: 代码现在默认使用 ImageNet 数据集。
-    # 如果想在没有完整数据集的情况下进行快速测试，请注释掉下面这行代码，
-    # 并取消 'FakeData' 部分的注释。
     base_image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=transform_train if x == 'train' else transform_val) for x in ['train', 'val']}
-    
-    # 使用 FakeData 进行可运行的示例 - 为了使用 ImageNet 已被注释掉
-    # base_image_datasets = {
-    #     'train': datasets.FakeData(size=1000, image_size=(3, img_size, img_size), transform=transform_train),
-    #     'val': datasets.FakeData(size=100, image_size=(3, img_size, img_size), transform=transform_val)
-    # }
     print("Base datasets loaded.")
     
     # 2. Wrap them with our custom HDEDataset
@@ -284,8 +277,17 @@ def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=
     print("HDEDatasets created.")
 
     # 3. Create samplers and dataloaders
-    samplers = {x: DistributedSampler(hde_datasets[x], shuffle=True) for x in ['train', 'val']}
-    
+    # Use DistributedSampler if in a distributed environment, otherwise use standard samplers.
+    if dist.is_available() and dist.is_initialized():
+        print("Using DistributedSampler.")
+        samplers = {x: DistributedSampler(hde_datasets[x], shuffle=True) for x in ['train', 'val']}
+    else:
+        print("Using standard RandomSampler/SequentialSampler.")
+        samplers = {
+            'train': torch.utils.data.RandomSampler(hde_datasets['train']),
+            'val': torch.utils.data.SequentialSampler(hde_datasets['val'])
+        }
+
     dataloaders = {
         'train': DataLoader(
             hde_datasets['train'],
