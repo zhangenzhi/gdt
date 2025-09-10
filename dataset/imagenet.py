@@ -133,7 +133,8 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     
     return dataloaders
 
-
+import sys
+sys.path.append("../")
 from gdt.hde import HDEProcessor, Rect, FixedQuadTree
 
 def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
