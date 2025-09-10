@@ -5,6 +5,11 @@ import logging
 import argparse
 from collections import OrderedDict
 
+# 新增的依赖，请确保已安装：pip install pandas tifffile
+import pandas as pd
+import tifffile
+import numpy as np
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -15,10 +20,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import GradScaler, autocast 
 
-# 假设您的模型文件现在名为 timm_sam_no_prompt.py 或类似名称
-# 并且其 forward 方法是 forward(self, images)
 sys.path.append("./")
 from model.timm_sam import SAMLikeModel
+from dataset.s8d import build_s8d_segmentation_dataloaders
 
 # --------------------------------------------- #
 #   1. 日志与 DDP 设置 (保持不变)
@@ -39,52 +43,6 @@ def setup_logging(args):
         ]
     )
 
-# --------------------------------------------- #
-#   2. S8D 分割数据集加载器
-# --------------------------------------------- #
-class S8DSegmentationDataset(Dataset):
-    """
-    一个简化的 S8D 分割数据集。
-    您需要根据您的数据存储格式来完善这部分。
-    """
-    def __init__(self, data_dir, split='train'):
-        # TODO: 完善这里，使其能找到您的图像和掩码文件
-        # 例如: self.image_files = sorted(glob.glob(os.path.join(data_dir, split, 'images', '*.raw')))
-        #       self.mask_files = sorted(glob.glob(os.path.join(data_dir, split, 'masks', '*.png')))
-        self.image_files = [] # 假设有100个样本用于演示
-        self.mask_files = []  # 假设有100个样本用于演示
-        logging.warning("S8DSegmentationDataset 是一个占位符，请根据您的数据格式进行实现！")
-        
-    def __len__(self):
-        # return len(self.image_files)
-        return 100 # 演示用
-
-    def __getitem__(self, idx):
-        # TODO: 在这里实现真实的图像和掩码加载逻辑
-        # img = np.fromfile(self.image_files[idx], ...).astype(np.float32)
-        # mask = Image.open(self.mask_files[idx]) ...
-        
-        # 模拟输出
-        img = torch.randn(1, 8192, 8192)
-        mask = torch.randint(0, 5, (8192, 8192)) # 5个类别
-        
-        return img, mask
-
-def build_s8d_segmentation_dataloaders(data_dir, batch_size, num_workers):
-    train_dataset = S8DSegmentationDataset(data_dir, split='train')
-    val_dataset = S8DSegmentationDataset(data_dir, split='val')
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=num_workers, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=num_workers, pin_memory=True)
-    
-    return {'train': train_loader, 'val': val_loader}
-
-# --------------------------------------------- #
-#   3. 新增: Dice Loss 和 Dice Score
-# --------------------------------------------- #
 class DiceLoss(nn.Module):
     """多类别分割的 Dice Loss"""
     def __init__(self, num_classes, softmax_dim=1, smooth=1e-5):
@@ -118,7 +76,7 @@ def calculate_dice_score(pred, target, num_classes, smooth=1e-5):
         union = pred_inds.sum().item() + target_inds.sum().item()
         
         if union == 0:
-            dice = 1.0 # 如果某个类别在预测和真值中都未出现，则认为完美匹配
+            dice = 1.0
         else:
             dice = (2. * intersection + smooth) / (union + smooth)
         dice_list.append(dice)
@@ -143,12 +101,12 @@ def train_segmentation_model(model, train_loader, val_loader, criterion, optimiz
         
         running_loss, running_dice = 0.0, 0.0
         
-        for i, (images, masks) in enumerate(train_loader):
+        # 关键修改：解包三个返回值
+        for i, (images, masks, _) in enumerate(train_loader):
             images = images.to(device_id, non_blocking=True)
             masks = masks.to(device_id, non_blocking=True)
             
             with autocast(device_type='cuda', dtype=torch.bfloat16):
-                # 移除了 prompt 生成，直接调用模型
                 logits = model(images)
                 loss = criterion(logits, masks)
             
@@ -194,11 +152,11 @@ def evaluate_segmentation_model(model, val_loader, device, num_classes, is_ddp=F
     model.eval()
     total_dice, num_samples = 0.0, 0
     with torch.no_grad():
-        for images, masks in val_loader:
+        # 关键修改：解包三个返回值
+        for images, masks, _ in val_loader:
             images, masks = images.to(device, non_blocking=True), masks.to(device, non_blocking=True)
             
             with autocast(device_type='cuda', dtype=torch.bfloat16):
-                # 移除了 prompt 生成，直接调用模型
                 logits = model(images)
             
             total_dice += calculate_dice_score(logits.cpu(), masks.cpu(), num_classes) * images.size(0)
@@ -214,7 +172,7 @@ def evaluate_segmentation_model(model, val_loader, device, num_classes, is_ddp=F
     return total_dice / num_samples if num_samples > 0 else 0
 
 # --------------------------------------------- #
-#   5. 主函数 (适配分割任务)
+#   5. 主函数 (保持不变)
 # --------------------------------------------- #
 def segmentation_s8d_finetune_ddp(args, config, mae_config):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -232,7 +190,6 @@ def segmentation_s8d_finetune_ddp(args, config, mae_config):
         num_workers=args.num_workers
     )
     
-    # 假设 SAMLikeModel 的 forward 是 forward(self, images)
     model = SAMLikeModel(config=mae_config, num_classes=config['model']['num_classes']).to(device)
     model.load_vit_backbone(args.mae_checkpoint)
         
@@ -240,12 +197,9 @@ def segmentation_s8d_finetune_ddp(args, config, mae_config):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
         model = torch.compile(model)
         
-    # find_unused_parameters 可能不再需要，但保留无害
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
-    # --- 差分学习率优化器 ---
     encoder_params = [p for n, p in model.module.image_encoder.named_parameters() if p.requires_grad]
-    # 假设模型中除了 image_encoder 的其他所有部分都是解码器
     decoder_params = [p for n, p in model.module.named_parameters() if not n.startswith('image_encoder.') and p.requires_grad]
     
     param_groups = [
@@ -256,7 +210,6 @@ def segmentation_s8d_finetune_ddp(args, config, mae_config):
     optimizer = torch.optim.AdamW(param_groups, weight_decay=config['training']['weight_decay'])
     criterion = DiceLoss(num_classes=config['model']['num_classes'])
     
-    # ... 调度器和检查点恢复逻辑 (您可以根据需要实现) ...
     scheduler = None 
     
     train_segmentation_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, start_epoch=0, best_val_dice=0.0, is_ddp=(world_size > 1))
@@ -265,13 +218,14 @@ def segmentation_s8d_finetune_ddp(args, config, mae_config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Segmentation Model Finetuning on S8D")
     parser.add_argument('--task', type=str, default='segmentation_finetune_s8d')
-    parser.add_argument('--config', type=str, default='./configs/ft_sam_s8d.yaml')
+    parser.add_argument('--config', type=str, default='./configs/ft_mae_sam-b16_S8D.yaml')
     parser.add_argument('--mae_config', type=str, default='./configs/mae-vit-b16_S8D.yaml') 
     parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b128-s8d/best_model.pth')
     
     parser.add_argument('--output', type=str, default='./output/finetune')
     parser.add_argument('--savefile', type=str, default='seg-ft-s8d')
-    parser.add_argument('--data_dir', type=str, default="/path/to/your/s8d_segmentation_data")
+    # 关键修改：更新了默认的数据目录
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/s8d/finetune/Noise_0.05_Blur_2_sparsity_2_NumAng_3600")
     parser.add_argument('--num_workers', type=int, default=16)
     
     args = parser.parse_args()
@@ -285,4 +239,3 @@ if __name__ == "__main__":
     os.makedirs(args.output, exist_ok=True)
     
     segmentation_s8d_finetune_ddp(args, config, mae_config)
-

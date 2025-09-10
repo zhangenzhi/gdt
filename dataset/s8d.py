@@ -12,6 +12,8 @@ import torchvision.transforms as transforms
 import argparse
 from tqdm import tqdm
 from PIL import Image, ImageFile
+import tifffile
+
 # Set the flag to load truncated images
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -135,6 +137,89 @@ class Spring8DatasetForStats(Dataset):
         image = (image / 65535.0 * 255.0).astype(np.uint8)
         # ToTensor scales uint8 (0-255) to float (0.0-1.0), which is what we need
         return self.transform(image)
+
+class S8DFinetune2D(Dataset):
+    """PyTorch Dataset for loading 2D slices from .tiff files."""
+    
+    def __init__(self, slice_dir, num_classes=5, transform=None, target_transform=None, subset=None):
+        self.slice_dir = slice_dir
+        self.transform = transform
+        self.num_classes = num_classes
+        self.target_transform = target_transform
+        self.manifest = self._load_manifest()
+        
+        if subset is not None:
+            self.manifest = self.manifest[self.manifest['slice_id'].isin(subset)].reset_index(drop=True)
+        
+    def _load_manifest(self):
+        manifest_path = os.path.join(self.slice_dir, 'slice_manifest.csv')
+        if not os.path.exists(manifest_path):
+            raise FileNotFoundError(f"未找到清单文件: {manifest_path}。请确保该文件存在于您的数据目录中。")
+        return pd.read_csv(manifest_path)
+    
+    def __len__(self):
+        return len(self.manifest)
+    
+    def __getitem__(self, idx):
+        record = self.manifest.iloc[idx]
+        
+        # 加载图像和标签
+        img_path = os.path.join(self.slice_dir, record['image_path'])
+        label_path = os.path.join(self.slice_dir, record['label_path'])
+        img = tifffile.imread(img_path)
+        label = tifffile.imread(label_path)
+        
+        if self.transform:
+            img = self.transform(img)
+        if self.target_transform:
+            label = self.target_transform(label)
+        
+        # 转换为张量
+        img_tensor = torch.from_numpy(img.astype(np.float32)).unsqueeze(0)
+        label_tensor = torch.from_numpy(label.astype(np.int64)) #<-- 关键修改: 直接返回 LongTensor
+        
+        # 归一化图像
+        min_val, max_val = torch.min(img_tensor), torch.max(img_tensor)
+        img_tensor = (img_tensor - min_val) / (max_val - min_val + 1e-6)
+        
+        return img_tensor, label_tensor, record['slice_id']
+    
+    def get_volume_ids(self):
+        return sorted(self.manifest['volume_id'].unique())
+    
+    def get_slices_for_volume(self, volume_id):
+        return self.manifest[self.manifest['volume_id'] == volume_id]['slice_id'].tolist()
+
+def build_s8d_segmentation_dataloaders(data_dir, batch_size, num_workers):
+    """
+    创建数据加载器，并自动进行 80/20 训练/验证集划分。
+    """
+    # 实例化一次以读取 manifest 和 volume_ids
+    full_dataset = S8DFinetune2D(slice_dir=data_dir)
+    volume_ids = full_dataset.get_volume_ids()
+    
+    # 基于 volume_id 划分训练和验证集
+    np.random.shuffle(volume_ids)
+    split_idx = int(len(volume_ids) * 0.8)
+    train_volume_ids = volume_ids[:split_idx]
+    val_volume_ids = volume_ids[split_idx:]
+    
+    train_slice_ids = [s for vol_id in train_volume_ids for s in full_dataset.get_slices_for_volume(vol_id)]
+    val_slice_ids = [s for vol_id in val_volume_ids for s in full_dataset.get_slices_for_volume(vol_id)]
+
+    print(f"数据集划分: {len(train_slice_ids)} 个训练切片, {len(val_slice_ids)} 个验证切片。")
+
+    # 使用划分好的子集创建数据集实例
+    train_dataset = S8DFinetune2D(slice_dir=data_dir, subset=train_slice_ids)
+    val_dataset = S8DFinetune2D(slice_dir=data_dir, subset=val_slice_ids)
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=num_workers, pin_memory=True)
+    
+    return {'train': train_loader, 'val': val_loader}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Calculate Mean and Std for S8D Dataset")
