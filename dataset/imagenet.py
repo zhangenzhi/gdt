@@ -541,9 +541,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader Example')
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=1, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
-    parser.add_argument('--img_size', type=int, default=224, help='Image size')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
+    parser.add_argument('--img_size', type=int, default=256, help='Image size')
     parser.add_argument('--fixed_length', type=int, default=196, help='Number of patches (sequence length)')
     parser.add_argument('--patch_size', type=int, default=16, help='Size of each patch after resizing')
 
