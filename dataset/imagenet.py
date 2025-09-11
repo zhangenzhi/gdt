@@ -161,17 +161,94 @@ def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.2
     
     return bgr_img
 
+# --- Visualization Function ---
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+def denormalize_for_plot(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """Denormalizes a tensor for matplotlib visualization."""
+    inv_normalize = transforms.Normalize(
+        mean=[-m/s for m, s in zip(mean, std)],
+        std=[1/s for s in std]
+    )
+    tensor = inv_normalize(tensor.cpu())
+    numpy_img = tensor.permute(1, 2, 0).numpy()
+    numpy_img = np.clip(numpy_img, 0, 1)  # Clip to valid range for imshow
+    return numpy_img
+
+def visualize_batch(batch, save_path="hde_visualization.png"):
+    """
+    Creates and saves a visualization of the HDE process for a batch of images.
+    """
+    original_images = batch['original_image']
+    hde_patches_batch = batch['patches']
+    coords_batch = batch['coords']
+    mask_batch = batch['mask']
+    
+    num_images_to_show = min(4, original_images.shape[0])
+    fig, axs = plt.subplots(num_images_to_show, 3, figsize=(15, 5 * num_images_to_show), squeeze=False)
+    fig.suptitle("HDE Dataloader Visualization", fontsize=16)
+
+    for i in range(num_images_to_show):
+        # --- 1. Original Image ---
+        original_img_np = denormalize_for_plot(original_images[i])
+        axs[i, 0].imshow(original_img_np)
+        axs[i, 0].set_title(f"Image {i+1}: Original")
+        axs[i, 0].axis('off')
+
+        # --- 2. Reconstruct HDE Image from Patches ---
+        h, w, _ = original_img_np.shape
+        reconstructed_img = np.zeros_like(original_img_np)
+        
+        hde_patches = hde_patches_batch[i]
+        coords = coords_batch[i]
+
+        for j in range(hde_patches.shape[0]):  # Iterate through patches
+            patch_tensor = hde_patches[j]
+            patch_np = denormalize_for_plot(patch_tensor)
+            
+            x1, x2, y1, y2 = coords[j].numpy()
+            original_h, original_w = y2 - y1, x2 - x1
+
+            if original_h == 0 or original_w == 0: continue  # Skip padding patches
+
+            resized_patch = cv2.resize(patch_np, (original_w, original_h), interpolation=cv2.INTER_CUBIC)
+            if resized_patch.ndim == 2: # Handle grayscale case if it ever occurs
+                resized_patch = np.expand_dims(resized_patch, axis=-1)
+            reconstructed_img[y1:y2, x1:x2, :] = resized_patch
+
+        axs[i, 1].imshow(reconstructed_img)
+        axs[i, 1].set_title("Reconstructed (Clean + Noised)")
+        axs[i, 1].axis('off')
+
+        # --- 3. Quadtree Overlay ---
+        axs[i, 2].imshow(reconstructed_img)
+        axs[i, 2].set_title("Quadtree Overlay (Clean=G, Noised=R)")
+        mask = mask_batch[i]
+
+        for j in range(coords.shape[0]):
+            x1, x2, y1, y2 = coords[j].numpy()
+            patch_w, patch_h = x2 - x1, y2 - y1
+            if patch_w == 0 or patch_h == 0: continue
+
+            is_noised = mask[j].item() == 1
+            edge_color = 'r' if is_noised else 'g'
+            
+            rect = patches.Rectangle((x1, y1), patch_w, patch_h, linewidth=1.2, edgecolor=edge_color, facecolor='none')
+            axs[i, 2].add_patch(rect)
+        axs[i, 2].axis('off')
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Visualization saved to {save_path}")
+    
 # --- Custom PyTorch Dataset for HDE ---
 
 class HDEDataset(Dataset):
     """
     A custom PyTorch Dataset that wraps an existing image dataset (e.g., ImageNet).
-    For each image, it performs the full HDE preprocessing pipeline:
-    1. Converts the tensor image to a NumPy array.
-    2. Applies Canny edge detection.
-    3. Builds an adaptive quadtree.
-    4. Generates a mixed sequence of clean and noised patches using HDEProcessor.
-    5. Serializes the patches and metadata into tensors for the model.
+    For each image, it performs the full HDE preprocessing pipeline.
     """
     def __init__(self, underlying_dataset, fixed_length=512, patch_size=16, visible_fraction=0.25):
         self.underlying_dataset = underlying_dataset
@@ -211,6 +288,7 @@ class HDEDataset(Dataset):
         final_patches = np.zeros((self.fixed_length, self.patch_size, self.patch_size, num_channels), dtype=np.float32)
         seq_size = np.zeros(self.fixed_length, dtype=np.int32)
         seq_pos = np.zeros((self.fixed_length, 2), dtype=np.float32)
+        seq_coords = np.zeros((self.fixed_length, 4), dtype=np.int32)
 
         leaf_nodes = [node for node, value in qdt.nodes]
         for i, patch in enumerate(patch_sequence):
@@ -226,6 +304,7 @@ class HDEDataset(Dataset):
             x_center = (bbox.x1 + bbox.x2) / 2
             y_center = (bbox.y1 + bbox.y2) / 2
             seq_pos[i] = [x_center, y_center]
+            seq_coords[i] = bbox.get_coord()
             
         # 7. Convert everything to PyTorch Tensors
         # Normalize patches from [0, 255] to [0, 1] and convert from HWC to CHW
@@ -239,12 +318,13 @@ class HDEDataset(Dataset):
             "patches": patches_tensor,
             "sizes": torch.from_numpy(seq_size),
             "positions": torch.from_numpy(seq_pos),
+            "coords": torch.from_numpy(seq_coords),
             "mask": torch.from_numpy(noised_mask),
             "target": target_label,
             "original_image": img_tensor # Return for visualization/debugging if needed
         }
         
-#  --- Dataloader Builder Function for HDE ---
+# --- Dataloader Builder Function for HDE ---
 
 def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=512, patch_size=16, num_workers=32):
     mean = [0.485, 0.456, 0.406]
@@ -532,20 +612,20 @@ def imagenet_iter(args):
 #         # The labels are indices. You can map them back to class names (folder names)
 #         print(f"Corresponding class names: {[class_names[i] for i in classes[:5]]}")
 
+# --- Example of how to use the dataloader for a full iteration ---
 if __name__ == '__main__':
     # This block will only run when the script is executed directly.
     # It demonstrates how to iterate through the entire dataset.
-    # NOTE: This is a single-process example. For multi-GPU training,
-    # you would need to initialize torch.distributed.
     import time
     parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader Example')
-    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default='/path/to/your/imagenet', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=1, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
-    parser.add_argument('--img_size', type=int, default=256, help='Image size')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
+    parser.add_argument('--img_size', type=int, default=224, help='Image size')
     parser.add_argument('--fixed_length', type=int, default=196, help='Number of patches (sequence length)')
     parser.add_argument('--patch_size', type=int, default=16, help='Size of each patch after resizing')
+    parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch')
 
     args = parser.parse_args()
     
@@ -559,7 +639,18 @@ if __name__ == '__main__':
         num_workers=args.num_workers
     )
     
-    print("Dataloaders built. Starting iteration...")
+    print("Dataloaders built.")
+
+    # Optional: Generate visualization before starting the main loop
+    if args.visualize:
+        print("\nGenerating visualization for one validation batch...")
+        try:
+            vis_batch = next(iter(dataloaders['val']))
+            visualize_batch(vis_batch, save_path="hde_visualization.png")
+        except Exception as e:
+            print(f"Could not generate visualization: {e}")
+
+    print("Starting iteration...")
     start_time = time.time()
     
     for epoch in range(args.num_epochs):
