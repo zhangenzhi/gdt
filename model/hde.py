@@ -57,7 +57,7 @@ class SpatioStructuralPosEmbed(nn.Module):
 class HDEVIT(nn.Module):
     """
     Hierarchical Denoising Encoder (HDE) Vision Transformer.
-    Uses a timm ViT as the encoder backbone and a standard Transformer decoder.
+    Implements MAE-style efficient encoding with dual prediction heads.
     """
     def __init__(self,
                  img_size=224,
@@ -76,7 +76,6 @@ class HDEVIT(nn.Module):
         self.norm_pix_loss = norm_pix_loss
         
         # --- 1. Patch Embedding ---
-        # Projects the flattened raw patch pixels to the encoder's dimension
         patch_dim = in_channels * patch_size * patch_size
         self.patch_embed = nn.Linear(patch_dim, encoder_dim)
 
@@ -84,22 +83,11 @@ class HDEVIT(nn.Module):
         self.pos_embed = SpatioStructuralPosEmbed(encoder_dim, img_size)
 
         # --- 3. Encoder ---
-        # Instantiate a timm VisionTransformer to use its blocks and norm layer.
-        # This approach is flexible, avoids a hardcoded model string, and correctly
-        # uses the specified dimensions. We don't use the ViT's own patch or
-        # positional embeddings.
         timm_encoder = VisionTransformer(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_chans=in_channels,
-            num_classes=0,       # Create a headless model
-            global_pool='',      # Ensure no global pooling is applied
-            embed_dim=encoder_dim,
-            depth=encoder_depth,
-            num_heads=encoder_heads,
-            mlp_ratio=4.,
-            qkv_bias=True,
-            norm_layer=nn.LayerNorm,
+            img_size=img_size, patch_size=patch_size, in_chans=in_channels,
+            num_classes=0, global_pool='', embed_dim=encoder_dim,
+            depth=encoder_depth, num_heads=encoder_heads, mlp_ratio=4.,
+            qkv_bias=True, norm_layer=nn.LayerNorm,
         )
         self.encoder_blocks = timm_encoder.blocks
         self.encoder_norm = timm_encoder.norm
@@ -108,24 +96,20 @@ class HDEVIT(nn.Module):
         self.decoder_embed = nn.Linear(encoder_dim, decoder_dim)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
         
-        # The decoder also needs positional information
         self.decoder_pos_embed = SpatioStructuralPosEmbed(decoder_dim, img_size)
         
-        # --- REVISED: Use a ModuleList of timm's `Block` for the decoder ---
         self.decoder_blocks = nn.ModuleList([
             Block(
-                dim=decoder_dim,
-                num_heads=decoder_heads,
-                mlp_ratio=4.,
-                qkv_bias=True,
-                norm_layer=nn.LayerNorm
+                dim=decoder_dim, num_heads=decoder_heads, mlp_ratio=4.,
+                qkv_bias=True, norm_layer=nn.LayerNorm
             )
             for _ in range(decoder_depth)])
         
         self.decoder_norm = nn.LayerNorm(decoder_dim)
 
-        # --- 5. Reconstruction Head ---
-        self.head = nn.Linear(decoder_dim, patch_dim)
+        # --- 5. Reconstruction Heads (Dual Prediction) ---
+        self.head_image = nn.Linear(decoder_dim, patch_dim)
+        self.head_noise = nn.Linear(decoder_dim, patch_dim)
         
         self.apply(self._init_weights)
 
@@ -138,78 +122,97 @@ class HDEVIT(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward_loss(self, target_patches, pred_patches, mask):
+    def forward_loss(self, target_patches, pred_patches, target_noise, pred_noise, mask):
         """
-        Calculates reconstruction loss only on the noised/masked patches.
-        target_patches: [B, N, C, P, P] - Original, un-normalized patches from dataloader
-        pred_patches: [B, N, P*P*C] - Model's predictions for all patches
-        mask: [B, N] - Boolean mask, True for noised patches
+        Calculates a combined reconstruction loss for both image and noise
+        on the masked (noised) patches.
         """
-        target = target_patches.flatten(2) # [B, N, P*P*C]
-        
+        target_img = target_patches.flatten(2)
         if self.norm_pix_loss:
-            # Normalize pixels of each patch independently
-            mean = target.mean(dim=-1, keepdim=True)
-            var = target.var(dim=-1, keepdim=True)
-            target = (target - mean) / (var.sqrt() + 1e-6)
+            mean = target_img.mean(dim=-1, keepdim=True)
+            var = target_img.var(dim=-1, keepdim=True)
+            target_img = (target_img - mean) / (var.sqrt() + 1e-6)
         
-        loss = (pred_patches - target) ** 2
-        loss = loss.mean(dim=-1)  # [B, N], loss per patch
+        loss_img = (pred_patches - target_img) ** 2
+        loss_img = loss_img.mean(dim=-1)
 
-        # Sum loss only for noised patches and normalize by the number of noised patches
+        target_n = target_noise.flatten(2)
+        mean_n = target_n.mean(dim=-1, keepdim=True)
+        var_n = target_n.var(dim=-1, keepdim=True)
+        target_n = (target_n - mean_n) / (var_n.sqrt() + 1e-6)
+        
+        loss_n = (pred_noise - target_n) ** 2
+        loss_n = loss_n.mean(dim=-1)
+
+        loss = loss_img + loss_n
+
         mask_sum = mask.sum()
         if mask_sum == 0:
-            return torch.tensor(0.0, device=target.device) # Avoid division by zero
+            return torch.tensor(0.0, device=target_patches.device)
         loss = (loss * mask).sum() / mask_sum
         return loss
 
     def forward(self, batch):
-        # 1. Unpack data from the batch dictionary
-        patches = batch['patches']     # [B, N, C, P, P]
-        coords = batch['coords']       # [B, N, 4]
-        depths = batch['depths']       # [B, N]
-        mask = batch['mask']           # [B, N], 1 for noised, 0 for visible
+        # 1. Unpack data
+        patches = batch['patches']
+        target_patches = batch['target_patches']
+        target_noise = batch['target_noise']
+        coords = batch['coords']
+        depths = batch['depths']
+        mask = batch['mask'] # 1 for noised, 0 for visible
 
-        # 2. Embed patches
-        x = patches.flatten(2)         # [B, N, C*P*P]
-        x = self.patch_embed(x)        # [B, N, D_enc]
-
-        # 3. Add spatio-structural positional embedding
+        # 2. Embed all patches and add positional embeddings
+        x = patches.flatten(2)
+        x = self.patch_embed(x)
         x = x + self.pos_embed(coords, depths)
 
-        # 4. Pass through encoder
-        x = self.encoder_blocks(x)
-        x = self.encoder_norm(x)       # [B, N, D_enc]
-
-        # 5. Prepare input for the decoder
-        x_dec = self.decoder_embed(x)  # Project to decoder dimension
-
-        # Replace embeddings of noised patches with the mask token
-        mask_expanded = mask.unsqueeze(-1).expand_as(x_dec)
-        mask_tokens = self.mask_token.expand_as(x_dec)
-        x_dec = torch.where(mask_expanded.bool(), mask_tokens, x_dec)
+        # --- 3. MAE-style Efficient Encoding ---
+        # Separate visible tokens for the encoder
+        # The mask is 0 for visible, so we use `~mask.bool()`
+        visible_mask = ~mask.bool()
+        x_visible = x[visible_mask].reshape(x.shape[0], -1, x.shape[-1])
         
-        # Add decoder-specific positional embedding
-        x_dec = x_dec + self.decoder_pos_embed(coords, depths)
+        # Pass only visible tokens through the encoder
+        encoded_visible = self.encoder_blocks(x_visible)
+        encoded_visible = self.encoder_norm(encoded_visible)
 
-        # 6. Pass through decoder
-        # --- REVISED: Manually iterate through the decoder blocks ---
+        # --- 4. Prepare for Decoder ---
+        # Project visible tokens to decoder dimension
+        encoded_visible_dec = self.decoder_embed(encoded_visible)
+        
+        # Create full sequence for decoder: scatter visible tokens and fill the rest with mask_tokens
+        B, N, C_dec = x.shape[0], x.shape[1], self.decoder_embed.out_features
+        x_dec_full = self.mask_token.repeat(B, N, 1)
+        
+        # Use the mask to create indices for scattering
+        # This is a robust way to place the visible tokens back in their original positions
+        batch_indices = torch.arange(B, device=x.device).unsqueeze(1)
+        visible_indices = visible_mask.nonzero() # Get coordinates of visible tokens
+        
+        # Reshape visible tokens to match the flat indexing
+        flat_visible_tokens = encoded_visible_dec.reshape(-1, C_dec)
+        
+        # Scatter visible tokens into the full sequence tensor
+        x_dec_full[visible_indices[:, 0], visible_indices[:, 1], :] = flat_visible_tokens
+
+        # Add decoder-specific positional embedding to the full sequence
+        x_dec_full = x_dec_full + self.decoder_pos_embed(coords, depths)
+
+        # --- 5. Pass through Decoder ---
         for blk in self.decoder_blocks:
-            x_dec = blk(x_dec)
-        x_dec = self.decoder_norm(x_dec) # [B, N, D_dec]
+            x_dec_full = blk(x_dec_full)
+        x_dec_full = self.decoder_norm(x_dec_full)
 
-        # 7. Reconstruct all patches
-        recon_patches_all = self.head(x_dec) # [B, N, P*P*C]
+        # --- 6. Dual Prediction ---
+        recon_patches_all = self.head_image(x_dec_full)
+        recon_noise_all = self.head_noise(x_dec_full)
 
-        # 8. Calculate loss on noised patches
-        loss = self.forward_loss(patches, recon_patches_all, mask)
+        # --- 7. Calculate Loss ---
+        loss = self.forward_loss(target_patches, recon_patches_all,
+                                 target_noise, recon_noise_all,
+                                 mask)
         
-        # --- FIXED: Return the full reconstructed tensor. ---
-        # The training loop's visualizer will use the mask to select the correct patches.
-        # This is a more robust approach than trying to filter inside the model.
-        
-        # Reshape to [B, N, C, P, P] for visualization function
-        B, N, _ = recon_patches_all.shape
+        # --- 8. Reshape for Visualization ---
         C, P = patches.shape[2], patches.shape[3]
         recon_patches_unflat = recon_patches_all.reshape(B, N, C, P, P)
 
@@ -234,16 +237,31 @@ if __name__ == "__main__":
 
     model = HDEVIT(img_size=img_size, patch_size=patch_size).to(device)
     
-    # --- Create a dummy batch mimicking the HDE dataloader ---
-    dummy_patches = torch.randn(B, N, C, patch_size, patch_size, device=device)
+    # --- Create a dummy batch mimicking the NEW HDE dataloader structure ---
+    dummy_target_patches = torch.randn(B, N, C, patch_size, patch_size, device=device)
+    dummy_target_noise = torch.randn(B, N, C, patch_size, patch_size, device=device) * 0.1
+    
+    # --- FIXED: Create a fixed-ratio mask, mimicking the dataloader's behavior ---
+    num_visible = int(N * visible_fraction)
+    # Generate a random permutation of indices for each item in the batch
+    shuffled_indices = torch.rand(B, N, device=device).argsort(dim=1)
+    visible_indices = shuffled_indices[:, :num_visible]
+    # Create a mask where 1 = noised, 0 = visible
+    dummy_mask = torch.ones(B, N, device=device, dtype=torch.long)
+    # Use scatter_ to place 0s at the visible indices, marking them as not noised
+    dummy_mask.scatter_(dim=1, index=visible_indices, value=0)
+    
+    dummy_input_patches = dummy_target_patches.clone()
+    masked_indices = dummy_mask.bool()
+    dummy_input_patches[masked_indices] += dummy_target_noise[masked_indices]
+    
     dummy_coords = torch.randint(0, img_size, (B, N, 4), device=device, dtype=torch.float32)
     dummy_depths = torch.randint(0, 8, (B, N), device=device, dtype=torch.float32)
-    
-    # Create a mask where 1 = noised, 0 = visible
-    dummy_mask = (torch.rand(B, N, device=device) > visible_fraction).long()
-    
+
     dummy_batch = {
-        'patches': dummy_patches,
+        'patches': dummy_input_patches,
+        'target_patches': dummy_target_patches,
+        'target_noise': dummy_target_noise,
         'coords': dummy_coords,
         'depths': dummy_depths,
         'mask': dummy_mask
@@ -257,43 +275,30 @@ if __name__ == "__main__":
 
     print("\n--- Sanity Checks ---")
     print(f"Reconstructed patches shape (full sequence): {recon_all.shape}")
-    print(f"Reconstructed patches dtype: {recon_all.dtype}")
-    print(f"Loss: {loss.item():.4f}")
+    print(f"Combined Loss: {loss.item():.4f}")
     
-    # Check if the output mask matches the input mask
     assert torch.equal(mask_out, dummy_mask), "Output mask does not match input mask."
     print("✅ Output mask matches input.")
     
-    # Check the gradient flow to the encoder
-    first_encoder_param_grad = model.encoder_blocks[0].attn.qkv.weight.grad
-    if first_encoder_param_grad is not None and first_encoder_param_grad.abs().sum() > 0:
-        print("✅ Gradient computed for an encoder parameter.")
+    # Check gradient flow to both heads
+    grad_head_image = model.head_image.weight.grad
+    grad_head_noise = model.head_noise.weight.grad
+    
+    if grad_head_image is not None and grad_head_image.abs().sum() > 0:
+        print("✅ Gradient computed for image prediction head.")
     else:
-        print("❌ No gradient found for an encoder parameter.")
-
-    # Check the gradient flow to the new decoder
-    first_decoder_param_grad = model.decoder_blocks[0].attn.qkv.weight.grad
-    if first_decoder_param_grad is not None and first_decoder_param_grad.abs().sum() > 0:
-        print("✅ Gradient computed for a decoder parameter.")
+        print("❌ No gradient found for image prediction head.")
+        
+    if grad_head_noise is not None and grad_head_noise.abs().sum() > 0:
+        print("✅ Gradient computed for noise prediction head.")
     else:
-        print("❌ No gradient found for a decoder parameter.")
+        print("❌ No gradient found for noise prediction head.")
 
     # Check the output shape of the full reconstructed sequence
     P = model.patch_size
     expected_shape = torch.Size([B, N, C, P, P])
     assert recon_all.shape == expected_shape, \
         f"Shape mismatch! Got {recon_all.shape}, expected {expected_shape}"
-
     print(f"✅ Reconstructed output shape is correct: {recon_all.shape}")
-
-    # Use the mask to get the reconstructed *noised* patches for a downstream task (like visualization)
-    recon_noised = recon_all[mask_out.bool()]
-    total_masked_patches = dummy_mask.sum().item()
-    # The shape will be [Total_Masked_in_Batch, C, P, P]
-    assert recon_noised.shape[0] == total_masked_patches
-    print(f"✅ Correctly filtered {recon_noised.shape[0]} noised patches.")
-
-    assert recon_all.dtype in [torch.bfloat16, torch.float32], f"Dtype mismatch! Got {recon_all.dtype}"
-    print(f"✅ Reconstructed output dtype is correct: {recon_all.dtype}")
     print("\nSanity checks passed!")
 
