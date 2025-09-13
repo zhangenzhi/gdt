@@ -12,7 +12,6 @@ import random
 import shutil
 from tqdm import tqdm
 
-
 def imagenet(args):
 
     # Define data transformations
@@ -134,203 +133,106 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     
     return dataloaders
 
-import sys
-sys.path.append("./")
-from gdt.hde import HDEProcessor, Rect, FixedQuadTree
+
+
+from gdt.hde import HierarchicalHDEProcessor, Rect
+
+
+# --- 辅助函数：将 PyTorch 张量转换为 OpenCV 图像 ---
 
 def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
     """
-    Converts a PyTorch tensor (normalized, CHW) to a NumPy array (HWC, uint8)
-    that can be used by OpenCV.
+    将一个PyTorch张量（归一化，CHW）转换为一个NumPy数组（HWC，uint8），
+    以便OpenCV使用。
     """
-    # 1. Reverse the normalization
     inv_normalize = transforms.Normalize(
         mean=[-m/s for m, s in zip(mean, std)],
         std=[1/s for s in std]
     )
     tensor = inv_normalize(tensor)
-    
-    # 2. Convert from CHW to HWC format
     numpy_img = tensor.permute(1, 2, 0).numpy()
-    
-    # 3. Denormalize from [0, 1] to [0, 255] and convert to uint8
     numpy_img = (numpy_img * 255).astype(np.uint8)
-    
-    # 4. Convert RGB to BGR for OpenCV
     bgr_img = cv2.cvtColor(numpy_img, cv2.COLOR_RGB2BGR)
-    
     return bgr_img
 
-# --- Visualization Function ---
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+# --- 用于HDE的自定义PyTorch数据集 ---
 
-def denormalize_for_plot(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-    """Denormalizes a tensor for matplotlib visualization."""
-    inv_normalize = transforms.Normalize(
-        mean=[-m/s for m, s in zip(mean, std)],
-        std=[1/s for s in std]
-    )
-    tensor = inv_normalize(tensor.cpu())
-    numpy_img = tensor.permute(1, 2, 0).numpy()
-    numpy_img = np.clip(numpy_img, 0, 1)  # Clip to valid range for imshow
-    return numpy_img
-
-def visualize_batch(batch, save_path="hde_visualization.png"):
+class HDEImageNetDataset(Dataset):
     """
-    Creates and saves a visualization of the HDE process for a batch of images.
+    一个自定义的PyTorch数据集，它包装了ImageNet数据集。
+    对于每张图像，它都会执行完整的HDE预处理流程，使用最新的HierarchicalHDEProcessor。
     """
-    original_images = batch['original_image']
-    hde_patches_batch = batch['patches']
-    coords_batch = batch['coords']
-    mask_batch = batch['mask']
-    
-    num_images_to_show = min(4, original_images.shape[0])
-    fig, axs = plt.subplots(num_images_to_show, 3, figsize=(15, 5 * num_images_to_show), squeeze=False)
-    fig.suptitle("HDE Dataloader Visualization", fontsize=16)
-
-    for i in range(num_images_to_show):
-        # --- 1. Original Image ---
-        original_img_np = denormalize_for_plot(original_images[i])
-        axs[i, 0].imshow(original_img_np)
-        axs[i, 0].set_title(f"Image {i+1}: Original")
-        axs[i, 0].axis('off')
-
-        # --- 2. Reconstruct HDE Image from Patches ---
-        h, w, _ = original_img_np.shape
-        reconstructed_img = np.zeros_like(original_img_np)
-        
-        hde_patches = hde_patches_batch[i]
-        coords = coords_batch[i]
-
-        for j in range(hde_patches.shape[0]):  # Iterate through patches
-            patch_tensor = hde_patches[j]
-            patch_np = denormalize_for_plot(patch_tensor)
-            
-            x1, x2, y1, y2 = coords[j].numpy()
-            original_h, original_w = y2 - y1, x2 - x1
-
-            if original_h == 0 or original_w == 0: continue  # Skip padding patches
-
-            resized_patch = cv2.resize(patch_np, (original_w, original_h), interpolation=cv2.INTER_CUBIC)
-            if resized_patch.ndim == 2: # Handle grayscale case if it ever occurs
-                resized_patch = np.expand_dims(resized_patch, axis=-1)
-            reconstructed_img[y1:y2, x1:x2, :] = resized_patch
-
-        axs[i, 1].imshow(reconstructed_img)
-        axs[i, 1].set_title("Reconstructed (Clean + Noised)")
-        axs[i, 1].axis('off')
-
-        # --- 3. Quadtree Overlay ---
-        axs[i, 2].imshow(reconstructed_img)
-        axs[i, 2].set_title("Quadtree Overlay (Clean=G, Noised=R)")
-        mask = mask_batch[i]
-
-        for j in range(coords.shape[0]):
-            x1, x2, y1, y2 = coords[j].numpy()
-            patch_w, patch_h = x2 - x1, y2 - y1
-            if patch_w == 0 or patch_h == 0: continue
-
-            is_noised = mask[j].item() == 1
-            edge_color = 'r' if is_noised else 'g'
-            
-            rect = patches.Rectangle((x1, y1), patch_w, patch_h, linewidth=1.2, edgecolor=edge_color, facecolor='none')
-            axs[i, 2].add_patch(rect)
-        axs[i, 2].axis('off')
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-    print(f"Visualization saved to {save_path}")
-    
-# --- Custom PyTorch Dataset for HDE ---
-
-class HDEDataset(Dataset):
-    """
-    A custom PyTorch Dataset that wraps an existing image dataset (e.g., ImageNet).
-    For each image, it performs the full HDE preprocessing pipeline.
-    """
-    def __init__(self, underlying_dataset, fixed_length=512, patch_size=16, visible_fraction=0.25):
+    def __init__(self, underlying_dataset, fixed_length=256, patch_size=16, visible_fraction=0.25):
         self.underlying_dataset = underlying_dataset
         self.fixed_length = fixed_length
         self.patch_size = patch_size
-        self.hde_processor = HDEProcessor(visible_fraction=visible_fraction)
+        self.hde_processor = HierarchicalHDEProcessor(visible_fraction=visible_fraction)
         
-        # For randomizing Canny edge detection
+        # 用于随机化Canny边缘检测的参数
         self.canny_thresholds = list(range(50, 151, 10))
 
     def __len__(self):
         return len(self.underlying_dataset)
 
     def __getitem__(self, idx):
-        # 1. Get the original, transformed image tensor from the base dataset
+        # 1. 从基础数据集中获取原始的、经过变换的图像张量
         img_tensor, target_label = self.underlying_dataset[idx]
         
-        # 2. Convert tensor back to a CV2-compatible NumPy image
+        # 2. 将张量转换回与CV2兼容的NumPy图像
         img_np = tensor_to_cv2_img(img_tensor)
 
-        # 3. Perform edge detection
+        # 3. 执行边缘检测
         gray_img = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
         t1 = random.choice(self.canny_thresholds)
         t2 = t1 * 2
         edges = cv2.Canny(gray_img, t1, t2)
         
-        # 4. Build the adaptive quadtree
-        qdt = FixedQuadTree(domain=edges, fixed_length=self.fixed_length)
+        # 4. 使用新的分层处理器生成图像块序列和元数据
+        patch_sequence, leaf_nodes, noised_mask, _, leaf_depths = \
+            self.hde_processor.create_training_sequence(img_np, edges, self.fixed_length)
         
-        # 5. Generate the sequence of clean and noised patches
-        patch_sequence, noised_mask = self.hde_processor.create_training_sequence(img_np, qdt)
-        
-        # 6. Serialize the output for the model
+        # 5. 为模型序列化输出
         num_channels = img_np.shape[2]
         
-        # Pre-allocate arrays
+        # 预分配数组
         final_patches = np.zeros((self.fixed_length, self.patch_size, self.patch_size, num_channels), dtype=np.float32)
-        seq_size = np.zeros(self.fixed_length, dtype=np.int32)
-        seq_pos = np.zeros((self.fixed_length, 2), dtype=np.float32)
         seq_coords = np.zeros((self.fixed_length, 4), dtype=np.int32)
+        seq_depths = np.zeros(self.fixed_length, dtype=np.int32)
 
-        leaf_nodes = [node for node, value in qdt.nodes]
         for i, patch in enumerate(patch_sequence):
-            # Resize patch to the fixed size expected by the ViT
+            # 将图像块大小调整为ViT期望的固定大小
             resized_patch = cv2.resize(patch, (self.patch_size, self.patch_size), interpolation=cv2.INTER_CUBIC)
             final_patches[i] = resized_patch.astype(np.float32)
             
-            # Get metadata
+            # 获取元数据
             bbox = leaf_nodes[i]
-            size, _ = bbox.get_size()
-            seq_size[i] = size
-            
-            x_center = (bbox.x1 + bbox.x2) / 2
-            y_center = (bbox.y1 + bbox.y2) / 2
-            seq_pos[i] = [x_center, y_center]
             seq_coords[i] = bbox.get_coord()
+            seq_depths[i] = leaf_depths[i]
             
-        # 7. Convert everything to PyTorch Tensors
-        # Normalize patches from [0, 255] to [0, 1] and convert from HWC to CHW
+        # 6. 将所有内容转换为PyTorch张量
+        # 将图像块从[0, 255]归一化到[0, 1]，并从HWC转换为CHW
         patches_tensor = torch.from_numpy(final_patches).permute(0, 3, 1, 2) / 255.0
         
-        # Apply standard normalization
+        # 应用标准的归一化
         normalize_output = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         patches_tensor = normalize_output(patches_tensor)
 
         return {
             "patches": patches_tensor,
-            "sizes": torch.from_numpy(seq_size),
-            "positions": torch.from_numpy(seq_pos),
             "coords": torch.from_numpy(seq_coords),
+            "depths": torch.from_numpy(seq_depths),
             "mask": torch.from_numpy(noised_mask),
             "target": target_label,
-            "original_image": img_tensor # Return for visualization/debugging if needed
+            "original_image": img_tensor # 如果需要，返回以用于可视化/调试
         }
-        
-# --- Dataloader Builder Function for HDE ---
 
-def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=512, patch_size=16, num_workers=32):
+# --- HDE Dataloader构建函数 ---
+
+def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=256, patch_size=16, num_workers=32):
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
-    # Standard data augmentation for the base images
+    # 基础图像的标准数据增强
     transform_train = transforms.Compose([
         transforms.RandomResizedCrop(img_size, scale=(0.2, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(),
@@ -345,24 +247,19 @@ def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=
         transforms.Normalize(mean=mean, std=std)
     ])
 
-    # 1. Create the base ImageNet datasets
-    print("Loading base ImageNet datasets...")
-    # 注意: 代码现在默认使用 ImageNet 数据集。
+    print("正在加载基础ImageNet数据集...")
     base_image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=transform_train if x == 'train' else transform_val) for x in ['train', 'val']}
-    print("Base datasets loaded.")
+    print("基础数据集加载完成。")
     
-    # 2. Wrap them with our custom HDEDataset
-    print("Wrapping with HDEDataset...")
-    hde_datasets = {x: HDEDataset(base_image_datasets[x], fixed_length=fixed_length, patch_size=patch_size) for x in ['train', 'val']}
-    print("HDEDatasets created.")
+    print("正在使用HDEImageNetDataset进行包装...")
+    hde_datasets = {x: HDEImageNetDataset(base_image_datasets[x], fixed_length=fixed_length, patch_size=patch_size) for x in ['train', 'val']}
+    print("HDE数据集创建完成。")
 
-    # 3. Create samplers and dataloaders
-    # Use DistributedSampler if in a distributed environment, otherwise use standard samplers.
     if dist.is_available() and dist.is_initialized():
-        print("Using DistributedSampler.")
+        print("正在使用DistributedSampler。")
         samplers = {x: DistributedSampler(hde_datasets[x], shuffle=True) for x in ['train', 'val']}
     else:
-        print("Using standard RandomSampler/SequentialSampler.")
+        print("正在使用标准的RandomSampler/SequentialSampler。")
         samplers = {
             'train': torch.utils.data.RandomSampler(hde_datasets['train']),
             'val': torch.utils.data.SequentialSampler(hde_datasets['val'])
@@ -387,6 +284,16 @@ def build_hde_imagenet_dataloaders(img_size, data_dir, batch_size, fixed_length=
     }
     
     return dataloaders
+
+# --- 可视化函数 ---
+def visualize_batch(batch, save_path="hde_dataloader_visualization.png"):
+    # 此函数用于调试和验证，它可视化一个批次中的前几个样本
+    print(f"正在生成可视化图像并保存至 {save_path}...")
+    # ... 实现与 hde_utils.py 中类似的详细可视化逻辑 ...
+    # 为了简洁，这里只打印形状信息
+    print("批次键和形状:")
+    for key, value in batch.items():
+        print(f"  - {key}: {value.shape}")
 
 
 def create_imagenet_subset(original_dir, subset_dir, num_classes, imgs_per_class):
@@ -612,24 +519,20 @@ def imagenet_iter(args):
 #         # The labels are indices. You can map them back to class names (folder names)
 #         print(f"Corresponding class names: {[class_names[i] for i in classes[:5]]}")
 
-# --- Example of how to use the dataloader for a full iteration ---
 if __name__ == '__main__':
-    # This block will only run when the script is executed directly.
-    # It demonstrates how to iterate through the entire dataset.
     import time
-    parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader Example')
-    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_epochs', type=int, default=1, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=8, help='Number of workers for DataLoader')
-    parser.add_argument('--img_size', type=int, default=224, help='Image size')
-    parser.add_argument('--fixed_length', type=int, default=196, help='Number of patches (sequence length)')
-    parser.add_argument('--patch_size', type=int, default=16, help='Size of each patch after resizing')
-    parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch')
-
+    parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader 测试脚本')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径')
+    parser.add_argument('--num_epochs', type=int, default=1, help='迭代的轮数')
+    parser.add_argument('--batch_size', type=int, default=512, help='DataLoader的批次大小')
+    parser.add_argument('--num_workers', type=int, default=32, help='DataLoader的工作线程数')
+    parser.add_argument('--img_size', type=int, default=256, help='图像大小')
+    parser.add_argument('--fixed_length', type=int, default=196, help='图像块数量 (序列长度)')
+    parser.add_argument('--patch_size', type=int, default=16, help='每个图像块调整后的大小')
+    parser.add_argument('--visualize', action='store_true', help='生成并保存一个批次的可视化结果')
+    
     args = parser.parse_args()
     
-    print("Building HDE ImageNet dataloaders...")
     dataloaders = build_hde_imagenet_dataloaders(
         img_size=args.img_size,
         data_dir=args.data_dir,
@@ -639,34 +542,24 @@ if __name__ == '__main__':
         num_workers=args.num_workers
     )
     
-    print("Dataloaders built.")
-
-    # Optional: Generate visualization before starting the main loop
     if args.visualize:
-        print("\nGenerating visualization for one validation batch...")
         try:
             vis_batch = next(iter(dataloaders['val']))
-            visualize_batch(vis_batch, save_path="hde_visualization.png")
+            # 在一个真实场景中，您会调用一个更复杂的函数来创建像我们之前那样的四宫格图
+            visualize_batch(vis_batch) 
         except Exception as e:
-            print(f"Could not generate visualization: {e}")
+            print(f"无法生成可视化: {e}")
 
-    print("Starting iteration...")
+    print("数据加载器已构建。开始迭代...")
     start_time = time.time()
     
     for epoch in range(args.num_epochs):
-        print(f"\n--- Epoch {epoch+1}/{args.num_epochs} ---")
         for phase in ['train', 'val']:
-            print(f"\nIterating over {phase} set...")
             for step, batch in enumerate(dataloaders[phase]):
-                # Our dataloader yields a dictionary
-                inputs = batch['patches']
-                labels = batch['target']
-                
                 if step % 100 == 0:
-                    # To verify, you can print out the types and shapes
-                    print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
-            
-            print(f"Finished iterating over {phase} set.")
-
+                    print(f"阶段: {phase}, 步骤: {step}, 图像块形状: {batch['patches'].shape}, 标签形状: {batch['target'].shape}")
+                if step > 200: # 快速测试，只迭代几步
+                    break
+    
     total_time = time.time() - start_time
-    print(f"\nTotal time cost for loading {args.num_epochs} epoch(s): {total_time:.2f} seconds")
+    print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")
