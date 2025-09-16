@@ -28,7 +28,7 @@ training:
   eta_min: 0.000001
 
   num_epochs: 200
-  batch_size: 256 # batch per node
+  batch_size: 128 # batch per node
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
