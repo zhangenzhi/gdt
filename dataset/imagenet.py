@@ -46,7 +46,7 @@ def imagenet(args):
                    for x in ['train', 'val']}
     return dataloaders
 
-from transform import ImagenetTransformArgs, build_transform
+from .transform import ImagenetTransformArgs, build_transform
 # 建议将 num_workers 作为参数传入，而不是依赖外部的 args
 def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
     """
