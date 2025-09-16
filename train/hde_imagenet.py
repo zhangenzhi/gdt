@@ -301,10 +301,10 @@ def hde_imagenet_pretrain_ddp(args, config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HDE Pre-training Script")
-    parser.add_argument('--config', type=str, default='./configs/hde-vit-b16_IN1K.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/hde-vit-b_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='hde_vit-b16', help='Subdirectory for saving logs and models')
-    parser.add_argument('--data_dir', type=str, default="/path/to/your/imagenet/", help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     
     args = parser.parse_args()

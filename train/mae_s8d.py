@@ -235,7 +235,7 @@ def evaluate_mae_model(model, val_loader, device, args, is_ddp=False, epoch=0):
     return total_loss / total_samples if total_samples > 0 else 0
 
 
-def mae_pretrain_ddp(args, config): # <--- MODIFIED: Renamed function
+def mae_pretrain_s8d(args, config): # <--- MODIFIED: Renamed function
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     device = torch.device("cuda", local_rank)
@@ -316,12 +316,12 @@ def mae_pretrain_ddp(args, config): # <--- MODIFIED: Renamed function
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAE S8D Pre-training Script")
     
-    parser.add_argument('--config', type=str, default='./configs/mae-vit-b128_S8D.yaml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config', type=str, default='./configs/mae-vit-b_S8D.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--task', type=str, default='mae_s8d_pretrain', help='Type of task')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='mae_vit-p128-s8d', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/s8d/pretrain", help='Path to the S8D dataset directory')
-    parser.add_argument('--num_workers', type=int, default=16, help='Number of workers for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     parser.add_argument('--reload', action='store_true', help='Resume training from the latest checkpoint')
     
     args = parser.parse_args()
@@ -333,4 +333,4 @@ if __name__ == "__main__":
     os.makedirs(args.output, exist_ok=True)
     
     # <--- MODIFIED: Call the renamed main function
-    mae_pretrain_ddp(args, config)
+    mae_pretrain_s8d(args, config)

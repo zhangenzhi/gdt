@@ -147,7 +147,7 @@ class S8DFinetune2D(Dataset):
         self.num_classes = num_classes
         self.target_transform = target_transform
         self.manifest = self._load_manifest()
-        
+
         if subset is not None:
             self.manifest = self.manifest[self.manifest['slice_id'].isin(subset)].reset_index(drop=True)
         

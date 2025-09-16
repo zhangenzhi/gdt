@@ -11,6 +11,8 @@ from train.gdt_vit import gdt_imagenet_train, gdt_imagenet_train_local
 # --- FIXED: Corrected import to match the function names in the provided script ---
 from train.vit_imagenet import vit_imagenet_train, vit_imagenet_train_single
 
+from train.mae_s8d import mae_pretrain_s8d
+
 def main():
     parser = argparse.ArgumentParser(description='Launcher for Vision Transformer Training')
     
@@ -58,6 +60,13 @@ def main():
         else:
             print("--- Launching ViT Baseline in Local Mode. ---")
             vit_imagenet_train_single(args, config)
+    elif task_name == 'mae_s8d_pretrain':
+        if is_ddp_environment:
+            print("--- Launching MAE-ViT in DDP Mode. ---")
+            mae_pretrain_s8d(args=args,config=config)
+        else:
+            print("--- Launching MAE-ViT in Local Mode. ---")
+            mae_pretrain_s8d(args=args,config=config)
     else:
         raise ValueError(f"Unknown task: {task_name}")
 
