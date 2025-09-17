@@ -134,9 +134,7 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     return dataloaders
 
 
-
 from gdt.hde import HierarchicalHDEProcessor, Rect
-
 
 # --- 辅助函数：将 PyTorch 张量转换为 OpenCV 图像 ---
 
@@ -295,6 +293,123 @@ def visualize_batch(batch, save_path="hde_dataloader_visualization.png"):
     for key, value in batch.items():
         print(f"  - {key}: {value.shape}")
 
+
+from gdt.shf import ImagePatchify
+from timm.data import create_transform
+from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+
+# --- 集成了timm数据增强的自定义Transform类 ---
+class SHFQuadtreeTransform:
+    def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
+        """
+        初始化Transform。
+        - is_train: 布尔值，指示是否为训练集。
+        - transform_args: 包含timm create_transform所需参数的对象。
+        """
+        # 这个base_transform只包含作用于PIL图像的增强
+        self.base_transform = self._build_pil_transform(is_train, transform_args)
+        
+        self.patchify = ImagePatchify(fixed_length=fixed_length, patch_size=patch_size, num_channels=3)
+
+    def _build_pil_transform(self, is_train, args):
+        """构建只包含PIL操作的数据增强部分。"""
+        if is_train:
+            # 使用timm的create_transform来获取标准的增强策略
+            timm_transform = create_transform(
+                input_size=args.input_size,
+                is_training=True,
+                color_jitter=args.color_jitter,
+                auto_augment=args.aa,
+                interpolation='bicubic',
+                re_prob=args.reprob,
+                re_mode=args.remode,
+                re_count=args.recount,
+                mean=IMAGENET_DEFAULT_MEAN,
+                std=IMAGENET_DEFAULT_STD,
+            )
+            # timm的transform默认最后两步是ToTensor和Normalize。
+            # 我们的流程需要在中间插入numpy操作，所以只取前面的PIL增强。
+            return transforms.Compose(timm_transform.transforms[:-2])
+        else:
+            # 为验证集构建标准的Resize和CenterCrop流程
+            if args.input_size <= 224:
+                crop_pct = 224 / 256
+            else:
+                crop_pct = 1.0
+            size = int(args.input_size / crop_pct)
+            return transforms.Compose([
+                transforms.Resize(size, interpolation=PIL.Image.BICUBIC),
+                transforms.CenterCrop(args.input_size),
+            ])
+
+    def __call__(self, pil_img):
+        # 1. 应用基础的PIL数据增强
+        augmented_pil = self.base_transform(pil_img)
+        
+        # 2. 将PIL图像转换为NumPy数组以进行cv2处理 (RGB -> BGR)
+        img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
+        
+        # 3. 应用自定义的ImagePatchify逻辑
+        seq_patches, seq_sizes, seq_pos = self.patchify(img_np)
+        
+        # 4. 将结果转换为Tensors
+        patches_np = np.stack(seq_patches, axis=0)
+        patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
+
+        sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
+        positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
+        
+        # 5. 手动进行归一化，这是此流程的正确步骤
+        normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
+        patches_tensor_normalized = normalize(patches_tensor / 255.0)
+
+        return {
+            "patches": patches_tensor_normalized,
+            "sizes": sizes_tensor,
+            "positions": positions_tensor
+        }
+
+# --- 主Dataloader构建函数 ---
+def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32):
+    fixed_length = (img_size // 16) ** 2 # 假设patch大小为16
+    patch_size = 16
+
+    # 为训练和验证创建timm数据增强的参数
+    train_transform_args = ImagenetTransformArgs(input_size=img_size)
+    val_transform_args = ImagenetTransformArgs(input_size=img_size)
+
+    # 创建集成了timm的自定义Transform
+    data_transforms = {
+        'train': SHFQuadtreeTransform(is_train=True, transform_args=train_transform_args, fixed_length=fixed_length, patch_size=patch_size),
+        'val': SHFQuadtreeTransform(is_train=False, transform_args=val_transform_args, fixed_length=fixed_length, patch_size=patch_size)
+    }
+
+    print("正在使用集成了timm的SHFQuadtreeTransform加载ImageNet数据集...")
+    image_datasets = {x: datasets.ImageNet(root=data_dir, split=x, transform=data_transforms[x])
+                      for x in ['train', 'val']}
+                      
+    if dist.is_available() and dist.is_initialized():
+        print("正在使用DistributedSampler。")
+        samplers = {x: DistributedSampler(image_datasets[x], shuffle=True) for x in ['train', 'val']}
+    else:
+        print("正在使用标准的RandomSampler/SequentialSampler。")
+        samplers = {
+            'train': torch.utils.data.RandomSampler(image_datasets['train']),
+            'val': torch.utils.data.SequentialSampler(image_datasets['val'])
+        }
+
+    dataloaders = {
+        'train': DataLoader(
+            image_datasets['train'], batch_size=batch_size, num_workers=num_workers,
+            pin_memory=True, sampler=samplers['train'], drop_last=True
+        ),
+        'val': DataLoader(
+            image_datasets['val'], batch_size=batch_size, num_workers=num_workers,
+            pin_memory=True, sampler=samplers['val']
+        )
+    }
+    
+    return dataloaders
 
 def create_imagenet_subset(original_dir, subset_dir, num_classes, imgs_per_class):
     """
@@ -519,47 +634,86 @@ def imagenet_iter(args):
 #         # The labels are indices. You can map them back to class names (folder names)
 #         print(f"Corresponding class names: {[class_names[i] for i in classes[:5]]}")
 
+# if __name__ == '__main__':
+#     import time
+#     parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader 测试脚本')
+#     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径')
+#     parser.add_argument('--num_epochs', type=int, default=1, help='迭代的轮数')
+#     parser.add_argument('--batch_size', type=int, default=512, help='DataLoader的批次大小')
+#     parser.add_argument('--num_workers', type=int, default=32, help='DataLoader的工作线程数')
+#     parser.add_argument('--img_size', type=int, default=256, help='图像大小')
+#     parser.add_argument('--fixed_length', type=int, default=196, help='图像块数量 (序列长度)')
+#     parser.add_argument('--patch_size', type=int, default=16, help='每个图像块调整后的大小')
+#     parser.add_argument('--visualize', action='store_true', help='生成并保存一个批次的可视化结果')
+    
+#     args = parser.parse_args()
+    
+#     dataloaders = build_hde_imagenet_dataloaders(
+#         img_size=args.img_size,
+#         data_dir=args.data_dir,
+#         batch_size=args.batch_size,
+#         fixed_length=args.fixed_length,
+#         patch_size=args.patch_size,
+#         num_workers=args.num_workers
+#     )
+    
+#     if args.visualize:
+#         try:
+#             vis_batch = next(iter(dataloaders['val']))
+#             # 在一个真实场景中，您会调用一个更复杂的函数来创建像我们之前那样的四宫格图
+#             visualize_batch(vis_batch) 
+#         except Exception as e:
+#             print(f"无法生成可视化: {e}")
+
+#     print("数据加载器已构建。开始迭代...")
+#     start_time = time.time()
+    
+#     for epoch in range(args.num_epochs):
+#         for phase in ['train', 'val']:
+#             for step, batch in enumerate(dataloaders[phase]):
+#                 if step % 100 == 0:
+#                     print(f"阶段: {phase}, 步骤: {step}, 图像块形状: {batch['patches'].shape}, 标签形状: {batch['target'].shape}")
+#                 if step > 200: # 快速测试，只迭代几步
+#                     break
+    
+#     total_time = time.time() - start_time
+#     print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")
+    
+    
+# --- 使用示例与健全性检查 ---
 if __name__ == '__main__':
-    import time
-    parser = argparse.ArgumentParser(description='PyTorch HDE ImageNet DataLoader 测试脚本')
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径')
-    parser.add_argument('--num_epochs', type=int, default=1, help='迭代的轮数')
-    parser.add_argument('--batch_size', type=int, default=512, help='DataLoader的批次大小')
-    parser.add_argument('--num_workers', type=int, default=32, help='DataLoader的工作线程数')
-    parser.add_argument('--img_size', type=int, default=256, help='图像大小')
-    parser.add_argument('--fixed_length', type=int, default=196, help='图像块数量 (序列长度)')
-    parser.add_argument('--patch_size', type=int, default=16, help='每个图像块调整后的大小')
-    parser.add_argument('--visualize', action='store_true', help='生成并保存一个批次的可视化结果')
-    
+    parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
+    parser.add_argument('--data_dir', type=str, required=True, help='ImageNet数据集的路径。')
+    parser.add_argument('--batch_size', type=int, default=4, help='用于测试的批次大小。')
+    parser.add_argument('--num_workers', type=int, default=2, help='工作线程数。')
     args = parser.parse_args()
-    
-    dataloaders = build_hde_imagenet_dataloaders(
-        img_size=args.img_size,
+
+    dataloaders = build_shf_imagenet_dataloader(
+        img_size=224,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
-        fixed_length=args.fixed_length,
-        patch_size=args.patch_size,
         num_workers=args.num_workers
     )
-    
-    if args.visualize:
-        try:
-            vis_batch = next(iter(dataloaders['val']))
-            # 在一个真实场景中，您会调用一个更复杂的函数来创建像我们之前那样的四宫格图
-            visualize_batch(vis_batch) 
-        except Exception as e:
-            print(f"无法生成可视化: {e}")
 
-    print("数据加载器已构建。开始迭代...")
-    start_time = time.time()
+    print("\n--- Dataloader健全性检查 ---")
+    print("正在从训练集中获取一个批次...")
     
-    for epoch in range(args.num_epochs):
-        for phase in ['train', 'val']:
-            for step, batch in enumerate(dataloaders[phase]):
-                if step % 100 == 0:
-                    print(f"阶段: {phase}, 步骤: {step}, 图像块形状: {batch['patches'].shape}, 标签形状: {batch['target'].shape}")
-                if step > 200: # 快速测试，只迭代几步
-                    break
+    batch = next(iter(dataloaders['train']))
     
-    total_time = time.time() - start_time
-    print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")
+    print("批次获取成功！")
+    print("批次中的键:", batch.keys())
+    
+    patches = batch['patches']
+    sizes = batch['sizes']
+    positions = batch['positions']
+    
+    print(f"\n'patches'张量的形状: {patches.shape}")
+    print(f"'sizes'张量的形状: {sizes.shape}")
+    print(f"'positions'张量的形状: {positions.shape}")
+
+    assert patches.shape == (args.batch_size, 196, 3, 16, 16)
+    assert sizes.shape == (args.batch_size, 196)
+    assert positions.shape == (args.batch_size, 196, 2)
+    
+    print("\n✅ 所有形状都正确！")
+    print("健全性检查通过。")
