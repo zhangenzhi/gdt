@@ -192,27 +192,27 @@ class HierarchicalHDEProcessor:
 
         return final_patches_sequence, leaf_nodes, is_noised_mask, noise_canvas, leaf_depths
 
+# For this self-contained example, we include the necessary base classes.
+class Rect:
+    def __init__(self, x1, x2, y1, y2) -> None:
+        self.x1 = int(x1); self.x2 = int(x2); self.y1 = int(y1); self.y2 = int(y2)
+        assert self.x1 <= self.x2 and self.y1 <= self.y2
+    def contains(self, domain):
+        if self.y1 >= self.y2 or self.x1 >= self.x2: return 0
+        patch = domain[self.y1:self.y2, self.x1:self.x2]
+        return int(np.sum(patch) / 255)
+    def get_area(self, img):
+        return img[self.y1:self.y2, self.x1:self.x2, :]
+    def get_coord(self):
+        return self.x1, self.x2, self.y1, self.y2
+    def get_size(self):
+        return self.x2 - self.x1, self.y2 - self.y1
+        
 # --- Example Usage ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hierarchical HDE Visualization Demo')
     parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
     args = parser.parse_args()
-
-    # For this self-contained example, we include the necessary base classes.
-    class Rect:
-        def __init__(self, x1, x2, y1, y2) -> None:
-            self.x1 = int(x1); self.x2 = int(x2); self.y1 = int(y1); self.y2 = int(y2)
-            assert self.x1 <= self.x2 and self.y1 <= self.y2
-        def contains(self, domain):
-            if self.y1 >= self.y2 or self.x1 >= self.x2: return 0
-            patch = domain[self.y1:self.y2, self.x1:self.x2]
-            return int(np.sum(patch) / 255)
-        def get_area(self, img):
-            return img[self.y1:self.y2, self.x1:self.x2, :]
-        def get_coord(self):
-            return self.x1, self.x2, self.y1, self.y2
-        def get_size(self):
-            return self.x2 - self.x1, self.y2 - self.y1
             
     # --- Start of Demo ---
     IMG_SIZE = 512

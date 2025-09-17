@@ -6,6 +6,8 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 
 import os
+import sys
+sys.path.append("../")
 import cv2
 import numpy as np
 import random
