@@ -343,6 +343,7 @@ class SHFQuadtreeTransform:
         patches_tensor_normalized = normalize(patches_tensor / 255.0)
         original_tensor_normalized = normalize(original_tensor)
 
+        print("--------prepared for returning --------")
         return {
             "patches": patches_tensor_normalized,
             "sizes": sizes_tensor,
