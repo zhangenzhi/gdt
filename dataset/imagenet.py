@@ -534,29 +534,29 @@ def imagenet_iter(args):
         print("Time cost for loading {}".format(time.time() - start_time))
            
 
-# if __name__ == "__main__":
-#     # 假设 args 已经通过某个函数（如 parse_args()）正确设置
-#     parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
-#     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
-#     # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
-#     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
-#     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-#     parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader')
-#     parser.add_argument('--num_workers', type=int, default=48, help='Number of workers for DataLoader')
+if __name__ == "__main__":
+    # 假设 args 已经通过某个函数（如 parse_args()）正确设置
+    parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
+    parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
+    # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
+    parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
+    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=48, help='Number of workers for DataLoader')
     
-#     args = parser.parse_args()
+    args = parser.parse_args()
     
-#     dataloaders = imagenet(args)
+    dataloaders = imagenet(args)
     
-#     import time
-#     start_time = time.time()
-#     for phase in ['train', 'val']:
-#         for step, (inputs, labels) in enumerate(dataloaders[phase]):
-#             if step % 100 == 0:
-#                 # 为了验证，可以打印出变量的类型和形状
-#                 print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+    import time
+    start_time = time.time()
+    for phase in ['train', 'val']:
+        for step, (inputs, labels) in enumerate(dataloaders[phase]):
+            if step % 100 == 0:
+                # 为了验证，可以打印出变量的类型和形状
+                print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
-#     print("Time cost for loading {}".format(time.time() - start_time))
+    print("Time cost for loading {}".format(time.time() - start_time))
 
 # if __name__ == '__main__':
 #     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
@@ -676,96 +676,96 @@ def imagenet_iter(args):
 #                     break
     
 #     total_time = time.time() - start_time
-#     print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")
-import time    
+#     print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")    
     
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
-    parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader.')
-    parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader.')
-    parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
-    args = parser.parse_args()
+# if __name__ == '__main__':
+#     import time
+#     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
+#     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
+#     parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader.')
+#     parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader.')
+#     parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
+#     args = parser.parse_args()
     
-    img_size = 256
-    dataloaders = build_shf_imagenet_dataloader(
-        img_size=img_size,
-        data_dir=args.data_dir,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers
-    )
+#     img_size = 256
+#     dataloaders = build_shf_imagenet_dataloader(
+#         img_size=img_size,
+#         data_dir=args.data_dir,
+#         batch_size=args.batch_size,
+#         num_workers=args.num_workers
+#     )
 
-    print("\n--- Dataloader Sanity Check ---")
+#     print("\n--- Dataloader Sanity Check ---")
     
-    if args.visualize:
-        from gdt.shf import denormalize, deserialize_patches
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as patches
-        print("Fetching one batch from the validation set for visualization...")
-        batch_dict, labels = next(iter(dataloaders['val']))
-        print("Batch fetched successfully!")
+#     if args.visualize:
+#         from gdt.shf import denormalize, deserialize_patches
+#         import matplotlib.pyplot as plt
+#         import matplotlib.patches as patches
+#         print("Fetching one batch from the validation set for visualization...")
+#         batch_dict, labels = next(iter(dataloaders['val']))
+#         print("Batch fetched successfully!")
         
-        original_img_tensor = batch_dict['original_image'][0]
-        patches_tensor = batch_dict['patches'][0]
-        coords_tensor = batch_dict['coords'][0]
+#         original_img_tensor = batch_dict['original_image'][0]
+#         patches_tensor = batch_dict['patches'][0]
+#         coords_tensor = batch_dict['coords'][0]
 
-        original_image_np = denormalize(original_img_tensor)
-        reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
+#         original_image_np = denormalize(original_img_tensor)
+#         reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
 
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
+#         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+#         fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
 
-        axes[0].imshow(original_image_np)
-        axes[0].set_title("Original Augmented Image")
-        axes[0].axis('off')
+#         axes[0].imshow(original_image_np)
+#         axes[0].set_title("Original Augmented Image")
+#         axes[0].axis('off')
 
-        axes[1].imshow(original_image_np)
-        axes[1].set_title("Quadtree Grid")
-        axes[1].axis('off')
-        for i in range(coords_tensor.shape[0]):
-            x1, x2, y1, y2 = coords_tensor[i].numpy()
-            if x2 - x1 > 0:
-                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
-                axes[1].add_patch(rect)
+#         axes[1].imshow(original_image_np)
+#         axes[1].set_title("Quadtree Grid")
+#         axes[1].axis('off')
+#         for i in range(coords_tensor.shape[0]):
+#             x1, x2, y1, y2 = coords_tensor[i].numpy()
+#             if x2 - x1 > 0:
+#                 rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
+#                 axes[1].add_patch(rect)
 
-        axes[2].imshow(reconstructed_image_np)
-        axes[2].set_title("Reconstructed Image")
-        axes[2].axis('off')
+#         axes[2].imshow(reconstructed_image_np)
+#         axes[2].set_title("Reconstructed Image")
+#         axes[2].axis('off')
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-        save_path = "shf_dataloader_visualization.png"
-        plt.savefig(save_path)
-        print(f"\n✅ Visualization saved to: {save_path}")
+#         plt.tight_layout(rect=[0, 0, 1, 0.95])
+#         save_path = "shf_dataloader_visualization.png"
+#         plt.savefig(save_path)
+#         print(f"\n✅ Visualization saved to: {save_path}")
 
-    else:
-        print("--- Full Iteration Speed Test ---")
-        total_start_time = time.time()
+#     else:
+#         print("--- Full Iteration Speed Test ---")
+#         total_start_time = time.time()
         
-        for phase in ['train', 'val']:
-            print(f"\nIterating over {phase} set...")
-            num_batches = len(dataloaders[phase])
+#         for phase in ['train', 'val']:
+#             print(f"\nIterating over {phase} set...")
+#             num_batches = len(dataloaders[phase])
             
-            # Use an iterator to manually pull batches for precise timing
-            data_iter = iter(dataloaders[phase])
-            batch_start_time = time.time() # Initialize before the loop
+#             # Use an iterator to manually pull batches for precise timing
+#             data_iter = iter(dataloaders[phase])
+#             batch_start_time = time.time() # Initialize before the loop
             
-            for i in range(num_batches):
-                # Fetching the batch is the main work we want to time
-                batch_dict, labels = next(data_iter)
-                batch_end_time = time.time()
+#             for i in range(num_batches):
+#                 # Fetching the batch is the main work we want to time
+#                 batch_dict, labels = next(data_iter)
+#                 batch_end_time = time.time()
                 
-                batch_time = batch_end_time - batch_start_time
-                current_batch_size = labels.shape[0]
-                time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
+#                 batch_time = batch_end_time - batch_start_time
+#                 current_batch_size = labels.shape[0]
+#                 time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
                 
-                # Report stats periodically
-                if (i + 1) % 2 == 0 or i == num_batches - 1:
-                    print(f"  Processed batch {i + 1}/{num_batches} | "
-                          f"Batch time: {batch_time:.3f}s | "
-                          f"Avg time/image: {time_per_image * 1000:.2f}ms")
+#                 # Report stats periodically
+#                 if (i + 1) % 2 == 0 or i == num_batches - 1:
+#                     print(f"  Processed batch {i + 1}/{num_batches} | "
+#                           f"Batch time: {batch_time:.3f}s | "
+#                           f"Avg time/image: {time_per_image * 1000:.2f}ms")
 
-                # Reset start time for the *next* batch processing
-                batch_start_time = time.time()
+#                 # Reset start time for the *next* batch processing
+#                 batch_start_time = time.time()
 
-        total_time = time.time() - total_start_time
-        print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
+#         total_time = time.time() - total_start_time
+#         print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
