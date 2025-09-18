@@ -318,9 +318,9 @@ class SHFQuadtreeTransform:
         # --- [KEY CHANGE] ---
         # Convert directly to a NumPy array without changing color space. It's now RGB.
         img_np = np.array(augmented_pil)
-        
+        print("Start Patchify")
         seq_patches, seq_sizes, seq_pos, qdt = self.patchify(img_np)
-        
+        print("End Patchify")
         patches_np = np.stack(seq_patches, axis=0)
         # Permute from [N, P, P, 3(RGB)] to [N, 3(RGB), P, P]
         patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
