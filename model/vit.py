@@ -150,6 +150,109 @@ class RelativeTransformerBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
+
+class SpatioStructuralPosEmbed(nn.Module):
+    """
+    Generates positional embeddings from patch center coordinates and sizes.
+    This is crucial for the model to understand the irregular patch layout.
+    """
+    def __init__(self, embed_dim, img_size=224):
+        super().__init__()
+        self.img_size = float(img_size)
+        
+        # An MLP to project the geometric features [cx, cy, size] into the embedding space
+        self.proj = nn.Sequential(
+            nn.Linear(3, embed_dim // 2),
+            nn.GELU(),
+            nn.Linear(embed_dim // 2, embed_dim)
+        )
+
+    def forward(self, positions, sizes):
+        # Normalize features to a [0, 1] range
+        # positions are (cx, cy)
+        pos_norm = positions / self.img_size
+        sizes_norm = sizes.unsqueeze(-1) / self.img_size
+        
+        # Concatenate features and project
+        features = torch.cat([pos_norm, sizes_norm], dim=-1)
+        pos_embed = self.proj(features)
+        
+        return pos_embed
+
+class SHFVisionTransformer(nn.Module):
+    """
+    A Vision Transformer adapted for the SHF dataloader.
+    It takes a dictionary of serialized patches and their metadata as input.
+    """
+    def __init__(self,
+                 img_size=224,
+                 patch_size=16,
+                 in_channels=3,
+                 num_classes=1000,
+                 embed_dim=768,
+                 depth=12,
+                 num_heads=12,
+                 mlp_ratio=4.0,
+                 **kwargs):
+        super().__init__()
+        
+        # --- 1. Custom Embedding Layers ---
+        patch_dim = in_channels * patch_size * patch_size
+        self.patch_embed = nn.Linear(patch_dim, embed_dim)
+        self.pos_embed = SpatioStructuralPosEmbed(embed_dim, img_size)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        # --- 2. Core Transformer Backbone (from timm) ---
+        timm_vit = VisionTransformer(
+            img_size=img_size, patch_size=patch_size, num_classes=num_classes,
+            embed_dim=embed_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio,
+        )
+        self.blocks = timm_vit.blocks
+        self.norm = timm_vit.norm
+        
+        # --- 3. Classification Head ---
+        self.head = timm_vit.head
+        
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, batch_dict):
+        # 1. Unpack the dictionary from the dataloader
+        patches = batch_dict['patches'] # Shape: [B, N, C, P, P]
+        sizes = batch_dict['sizes']       # Shape: [B, N]
+        positions = batch_dict['positions'] # Shape: [B, N, 2]
+        
+        B, N, C, P, _ = patches.shape
+        
+        # 2. Flatten and embed patches
+        x = patches.flatten(2)         # Shape: [B, N, C*P*P]
+        x = self.patch_embed(x)        # Shape: [B, N, D_embed]
+
+        # 3. Add the custom spatio-structural positional embedding
+        x = x + self.pos_embed(positions, sizes)
+
+        # 4. Prepend CLS token
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1) # Shape: [B, N+1, D_embed]
+        
+        # 5. Pass through Transformer blocks
+        x = self.blocks(x)
+        x = self.norm(x)
+        
+        # 6. Pass CLS token to classification head
+        cls_output = x[:, 0]
+        logits = self.head(cls_output)
+        
+        return logits
+    
 class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
     """ Vision Transformer with support for global average pooling
     """

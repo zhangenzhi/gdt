@@ -764,7 +764,7 @@ if __name__ == '__main__':
                 
                 if (i + 1) % 100 == 0 or i == num_batches - 1:
                     # This print is just for progress, not for timing
-                    print(f"  Processed batch {i + 1}/{num_batches}...")
+                    print(f"  Processed batch {i + 1}/{num_batches}, current batch time: {batch_time}")
 
                 # Reset timer for the next batch
                 batch_start_time = time.time()
