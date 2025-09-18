@@ -721,33 +721,62 @@ if __name__ == '__main__':
 
     else:
         print("--- Full Iteration Speed Test ---")
-        total_start_time = time.time()
         
         for phase in ['train', 'val']:
             print(f"\nIterating over {phase} set...")
             num_batches = len(dataloaders[phase])
-            
-            # Use an iterator to manually pull batches for precise timing
             data_iter = iter(dataloaders[phase])
-            batch_start_time = time.time() # Initialize before the loop
             
-            for i in range(num_batches):
+            if num_batches < 2:
+                print("Not enough batches to perform a warm-up and benchmark. Skipping speed test.")
+                continue
+
+            # --- Warm-up Phase ---
+            print("  Processing first batch (includes worker startup cost)...")
+            start_warmup = time.time()
+            batch_dict, labels = next(data_iter)
+            end_warmup = time.time()
+            
+            first_batch_time = end_warmup - start_warmup
+            current_batch_size = labels.shape[0]
+            time_per_image_warmup = first_batch_time / current_batch_size if current_batch_size > 0 else 0
+            print(f"  Warm-up batch 1/{num_batches} processed. | "
+                  f"Batch time: {first_batch_time:.8f}s | "
+                  f"Time/image: {time_per_image_warmup * 1000:.8f}ms")
+
+            # --- Benchmarking Phase ---
+            print("  Starting main benchmark loop...")
+            
+            total_benchmark_time = 0.0
+            total_images_processed = 0
+            batch_start_time = time.time() # Initialize for the first benchmark batch
+
+            for i in range(1, num_batches):
                 # Fetching the batch is the main work we want to time
                 batch_dict, labels = next(data_iter)
                 batch_end_time = time.time()
-                
+
+                # Calculate time for this specific batch and accumulate
                 batch_time = batch_end_time - batch_start_time
                 current_batch_size = labels.shape[0]
-                time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
+                total_benchmark_time += batch_time
+                total_images_processed += current_batch_size
                 
-                # Report stats periodically
                 if (i + 1) % 100 == 0 or i == num_batches - 1:
-                    print(f"  Processed batch {i + 1}/{num_batches} | "
-                          f"Batch time: {batch_time:.8f}s | "
-                          f"Avg time/image: {time_per_image * 1000:.8f}ms")
+                    # This print is just for progress, not for timing
+                    print(f"  Processed batch {i + 1}/{num_batches}...")
 
-                # Reset start time for the *next* batch processing
+                # Reset timer for the next batch
                 batch_start_time = time.time()
+            
+            # --- Report Results ---
+            avg_batch_time = total_benchmark_time / (num_batches - 1) if num_batches > 1 else 0
+            avg_time_per_image = total_benchmark_time / total_images_processed if total_images_processed > 0 else 0
+            
+            print(f"\n  --- {phase.capitalize()} Set Benchmark Results (excluding first batch) ---")
+            print(f"  Total benchmark time: {total_benchmark_time:.8f}s for {num_batches - 1} batches")
+            print(f"  Total images processed: {total_images_processed}")
+            print(f"  Average batch time: {avg_batch_time:.8f}s")
+            print(f"  Overall average time per image: {avg_time_per_image * 1000:.8f}ms")
 
-        total_time = time.time() - total_start_time
-        print(f"\n✅ Full iteration completed in {total_time:.8f} seconds.")
+        print(f"\n✅ Full iteration completed.")
