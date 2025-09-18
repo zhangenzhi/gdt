@@ -703,7 +703,7 @@ def imagenet_iter(args):
 # --- 使用示例与健全性检查 ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
-    parser.add_argument('--data_dir', type=str, required=True, help='ImageNet数据集的路径。')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径。')
     parser.add_argument('--batch_size', type=int, default=4, help='用于测试的批次大小。')
     parser.add_argument('--num_workers', type=int, default=2, help='工作线程数。')
     args = parser.parse_args()
