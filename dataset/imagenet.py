@@ -317,28 +317,16 @@ class SHFQuadtreeTransform:
     def _build_pil_transform(self, is_train, args):
         """构建只包含PIL操作的数据增强部分。"""
         if is_train:
-            # 使用timm的create_transform来获取标准的增强策略
             timm_transform = create_transform(
-                input_size=args.input_size,
-                is_training=True,
-                color_jitter=args.color_jitter,
-                auto_augment=args.aa,
-                interpolation='bicubic',
-                re_prob=args.reprob,
-                re_mode=args.remode,
-                re_count=args.recount,
-                mean=IMAGENET_DEFAULT_MEAN,
-                std=IMAGENET_DEFAULT_STD,
+                input_size=args.input_size, is_training=True,
+                color_jitter=args.color_jitter, auto_augment=args.aa,
+                interpolation='bicubic', re_prob=args.reprob,
+                re_mode=args.remode, re_count=args.recount,
+                mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD,
             )
-            # timm的transform默认最后两步是ToTensor和Normalize。
-            # 我们的流程需要在中间插入numpy操作，所以只取前面的PIL增强。
             return transforms.Compose(timm_transform.transforms[:-2])
         else:
-            # 为验证集构建标准的Resize和CenterCrop流程
-            if args.input_size <= 224:
-                crop_pct = 224 / 256
-            else:
-                crop_pct = 1.0
+            crop_pct = 224 / 256 if args.input_size <= 224 else 1.0
             size = int(args.input_size / crop_pct)
             return transforms.Compose([
                 transforms.Resize(size, interpolation=PIL.Image.BICUBIC),
@@ -346,6 +334,12 @@ class SHFQuadtreeTransform:
             ])
 
     def __call__(self, pil_img):
+        # --- [关键修复] ---
+        # 确保所有图像都是3通道RGB格式，以处理数据集中的灰度图
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        # -------------------
+
         # 1. 应用基础的PIL数据增强
         augmented_pil = self.base_transform(pil_img)
         
@@ -353,7 +347,7 @@ class SHFQuadtreeTransform:
         img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
         
         # 3. 应用自定义的ImagePatchify逻辑
-        seq_patches, seq_sizes, seq_pos, qdt = self.patchify(img_np)
+        seq_patches, seq_sizes, seq_pos, _ = self.patchify(img_np)
         
         # 4. 将结果转换为Tensors
         patches_np = np.stack(seq_patches, axis=0)
@@ -362,7 +356,7 @@ class SHFQuadtreeTransform:
         sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
         positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
         
-        # 5. 手动进行归一化，这是此流程的正确步骤
+        # 5. 手动进行归一化
         normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
         patches_tensor_normalized = normalize(patches_tensor / 255.0)
 
