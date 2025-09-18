@@ -675,7 +675,6 @@ def imagenet_iter(args):
     
     
 # --- 使用示例与健全性检查 ---
-# --- 使用示例与健全性检查 ---
 if __name__ == '__main__':
     from gdt.shf import denormalize,deserialize_patches
     import matplotlib.pyplot as plt
