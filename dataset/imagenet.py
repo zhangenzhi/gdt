@@ -703,58 +703,58 @@ if __name__ == '__main__':
     print("批次获取成功！")
 
     if args.visualize:
-        # 从批次中选择第一个样本进行可视化
+        # Select the first sample from the batch for visualization
         original_img_tensor = batch_dict['original_image'][0]
         patches_tensor = batch_dict['patches'][0]
         coords_tensor = batch_dict['coords'][0]
 
-        # 1. 获取原始图像
+        # 1. Get the original image
         original_image_np = denormalize(original_img_tensor)
         
-        # 2. 从序列化图块中重建图像
+        # 2. Reconstruct the image from serialized patches
         reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
 
-        # 3. 创建并保存可视化图
+        # 3. Create and save the visualization plot
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        fig.suptitle("SHF Dataloader 可视化检查", fontsize=16)
+        fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
 
         axes[0].imshow(original_image_np)
-        axes[0].set_title("原始增强图")
+        axes[0].set_title("Original Augmented Image")
         axes[0].axis('off')
 
         axes[1].imshow(original_image_np)
-        axes[1].set_title("四叉树分割图")
+        axes[1].set_title("Quadtree Grid")
         axes[1].axis('off')
         for i in range(coords_tensor.shape[0]):
             x1, x2, y1, y2 = coords_tensor[i].numpy()
-            if x2 - x1 > 0: # 只绘制有效图块的边框
+            if x2 - x1 > 0: # Only draw borders for valid patches
                 rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
                 axes[1].add_patch(rect)
 
         axes[2].imshow(reconstructed_image_np)
-        axes[2].set_title("重建图")
+        axes[2].set_title("Reconstructed Image")
         axes[2].axis('off')
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         save_path = "shf_dataloader_visualization.png"
         plt.savefig(save_path)
-        print(f"\n✅ 可视化结果已保存至: {save_path}")
+        print(f"\n✅ Visualization saved to: {save_path}")
 
     else:
-        # 如果不进行可视化，则执行标准的形状检查
-        print("批次中的键:", batch_dict.keys())
+        # If not visualizing, perform the standard shape check
+        print("Keys in batch:", batch_dict.keys())
         patches = batch_dict['patches']
         sizes = batch_dict['sizes']
         positions = batch_dict['positions']
         
-        print(f"\n'patches'张量的形状: {patches.shape}")
-        print(f"'sizes'张量的形状: {sizes.shape}")
-        print(f"'positions'张量的形状: {positions.shape}")
-        print(f"'labels'张量的形状: {labels.shape}")
+        print(f"\nShape of 'patches' tensor: {patches.shape}")
+        print(f"Shape of 'sizes' tensor: {sizes.shape}")
+        print(f"Shape of 'positions' tensor: {positions.shape}")
+        print(f"Shape of 'labels' tensor: {labels.shape}")
 
         assert patches.shape == (args.batch_size, (img_size//16)**2, 3, 16, 16)
         assert sizes.shape == (args.batch_size, (img_size//16)**2)
         assert positions.shape == (args.batch_size, (img_size//16)**2, 2)
         assert labels.shape == (args.batch_size,)
         
-        print("\n✅ 所有形状都正确！健全性检查通过。")
+        print("\n✅ All shapes are correct! Sanity check passed.")
