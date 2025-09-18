@@ -303,18 +303,10 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 class SHFQuadtreeTransform:
     def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
-        """
-        初始化Transform。
-        - is_train: 布尔值，指示是否为训练集。
-        - transform_args: 包含timm create_transform所需参数的对象。
-        """
-        # 这个base_transform只包含作用于PIL图像的增强
         self.base_transform = self._build_pil_transform(is_train, transform_args)
-        
         self.patchify = ImagePatchify(fixed_length=fixed_length, patch_size=patch_size, num_channels=3)
 
     def _build_pil_transform(self, is_train, args):
-        """构建只包含PIL操作的数据增强部分。"""
         if is_train:
             timm_transform = create_transform(
                 input_size=args.input_size, is_training=True,
@@ -333,63 +325,45 @@ class SHFQuadtreeTransform:
             ])
 
     def __call__(self, pil_img):
-            try:
-                # --- [关键修复] ---
-                # 确保所有图像都是3通道RGB格式，以处理数据集中的灰度图
-                if pil_img.mode != 'RGB':
-                    pil_img = pil_img.convert('RGB')
-                # -------------------
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        
+        augmented_pil = self.base_transform(pil_img)
 
-                # 1. 应用基础的PIL数据增强
-                augmented_pil = self.base_transform(pil_img)
-                
-                # 2. 将PIL图像转换为NumPy数组以进行cv2处理 (RGB -> BGR)
-                img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
-                
-                # --- [调试打印] ---
-                print(f"[Debug] Shape of img_np: {img_np.shape}, Dtype: {img_np.dtype}")
+        if augmented_pil.mode != 'RGB':
+            augmented_pil = augmented_pil.convert('RGB')
+        
+        img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
+        
+        seq_patches, seq_sizes, seq_pos, qdt = self.patchify(img_np)
+        
+        patches_np = np.stack(seq_patches, axis=0)
+        patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
 
-                # 3. 应用自定义的ImagePatchify逻辑
-                # [修正] ImagePatchify 返回 3 个值
-                seq_patches, seq_sizes, seq_pos = self.patchify(img_np)
-                
-                # 4. 将结果转换为Tensors
-                # --- [调试打印] ---
-                if seq_patches and isinstance(seq_patches[0], np.ndarray):
-                    print(f"[Debug] Shape of first patch in seq_patches: {seq_patches[0].shape}")
-                
-                patches_np = np.stack(seq_patches, axis=0)
-                
-                # --- [调试打印] ---
-                print(f"[Debug] Shape of patches_np after stacking: {patches_np.shape}")
+        sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
+        positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
+        
+        # 获取坐标用于可视化
+        coords = [node[0].get_coord() for node in qdt.nodes]
+        if len(coords) < self.patchify.fixed_length:
+            padding_needed = self.patchify.fixed_length - len(coords)
+            coords.extend([(0,0,0,0)] * padding_needed)
+        coords_tensor = torch.tensor(coords, dtype=torch.long)
 
-                patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
+        # 获取用于可视化的原始图像张量
+        original_tensor = transforms.ToTensor()(augmented_pil)
+        
+        normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
+        patches_tensor_normalized = normalize(patches_tensor / 255.0)
+        original_tensor_normalized = normalize(original_tensor)
 
-                sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
-                positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
-                
-                # 5. 手动进行归一化
-                normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
-                patches_tensor_normalized = normalize(patches_tensor / 255.0)
-
-                return {
-                    "patches": patches_tensor_normalized,
-                    "sizes": sizes_tensor,
-                    "positions": positions_tensor
-                }
-            except Exception as e:
-                print(f"--- ERROR in DataLoader Worker ---")
-                # 打印更多上下文信息以帮助调试
-                print(f"Error type: {type(e).__name__}")
-                print(f"Error message: {e}")
-                if 'img_np' in locals():
-                    print(f"Shape of img_np that caused error: {img_np.shape}")
-                if 'seq_patches' in locals() and seq_patches:
-                    # 检查第一个图像块的形状
-                    print(f"Shape of the first patch in seq_patches: {seq_patches[0].shape}")
-                if 'patches_np' in locals():
-                    print(f"Shape of patches_np that caused error: {patches_np.shape}")
-                raise e # 重新抛出异常，以便DataLoader可以处理它
+        return {
+            "patches": patches_tensor_normalized,
+            "sizes": sizes_tensor,
+            "positions": positions_tensor,
+            "coords": coords_tensor, # 新增
+            "original_image": original_tensor_normalized # 新增
+        }
 
 # --- 主Dataloader构建函数 ---
 def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32):
@@ -709,7 +683,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     dataloaders = build_shf_imagenet_dataloader(
-        img_size=224,
+        img_size=256,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers

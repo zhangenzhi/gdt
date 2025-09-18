@@ -294,6 +294,13 @@ class Rect:
     
     def get_center(self):
         return (self.x2 + self.x1) / 2, (self.y2 + self.y1) / 2
+    
+    def draw(self, ax, c='cyan', lw=1, **kwargs):
+        rect = patches.Rectangle((self.x1, self.y1), 
+                                 width=self.x2-self.x1, 
+                                 height=self.y2-self.y1, 
+                                 linewidth=lw, edgecolor=c, facecolor='none')
+        ax.add_patch(rect)
 
 class FixedQuadTree:
     def __init__(self, domain, fixed_length=128) -> None:
@@ -315,23 +322,23 @@ class FixedQuadTree:
 
             idx = self.nodes.index([bbox, value])
             
-            # --- [关键修复] 使用更稳健的分割逻辑 ---
             width, height = bbox.get_size()
-            # 如果块的宽度或高度小于2像素，则无法再进行有意义的分割
             if width < 2 or height < 2 or value == 0:
-                break
+                # 找到下一个最佳分裂点
+                temp_nodes = self.nodes[:idx] + self.nodes[idx+1:]
+                if not temp_nodes: break
+                
+                # 为了避免无限循环，我们将当前节点的值设为-1，以便不再选择它
+                self.nodes[idx][1] = -1
+                continue
 
             x1, x2, y1, y2 = bbox.get_coord()
-            # 使用整数除法来安全地计算分割点
             cx = x1 + width // 2
             cy = y1 + height // 2
             
-            # 定义四个象限
             children_defs = [
-                (x1, cx, y1, cy), # Top-Left
-                (cx, x2, y1, cy), # Top-Right
-                (x1, cx, cy, y2), # Bottom-Left
-                (cx, x2, cy, y2)  # Bottom-Right
+                (x1, cx, y1, cy), (cx, x2, y1, cy),
+                (x1, cx, cy, y2), (cx, x2, cy, y2)
             ]
             
             new_nodes = []
@@ -341,7 +348,6 @@ class FixedQuadTree:
                 new_nodes.append([child_rect, child_val])
             
             self.nodes = self.nodes[:idx] + new_nodes + self.nodes[idx+1:]
-            # ---------------------------------------------
 
     def serialize(self, img, patch_size, num_channels):
         seq_patch = []
@@ -378,7 +384,6 @@ class ImagePatchify:
         self.cannys = list(range(50, 151, 10))
         
     def __call__(self, img_np):
-        # 确保进入此流程的 NumPy 数组始终为 3 通道 BGR 图像。
         if img_np.ndim == 2:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
         elif img_np.ndim == 3 and img_np.shape[2] == 1:
@@ -399,4 +404,5 @@ class ImagePatchify:
         seq_patches, seq_sizes, seq_pos = qdt.serialize(
             img_np, self.patch_size, self.num_channels
         )
-        return seq_patches, seq_sizes, seq_pos
+        # 返回qdt以便于在transform中获取坐标信息
+        return seq_patches, seq_sizes, seq_pos, qdt
