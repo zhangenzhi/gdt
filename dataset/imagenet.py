@@ -739,14 +739,33 @@ if __name__ == '__main__':
 
     else:
         print("--- Full Iteration Speed Test ---")
-        start_time = time.time()
+        total_start_time = time.time()
         
         for phase in ['train', 'val']:
             print(f"\nIterating over {phase} set...")
             num_batches = len(dataloaders[phase])
-            for i, (batch_dict, labels) in enumerate(dataloaders[phase]):
+            
+            # Use an iterator to manually pull batches for precise timing
+            data_iter = iter(dataloaders[phase])
+            batch_start_time = time.time() # Initialize before the loop
+            
+            for i in range(num_batches):
+                # Fetching the batch is the main work we want to time
+                batch_dict, labels = next(data_iter)
+                batch_end_time = time.time()
+                
+                batch_time = batch_end_time - batch_start_time
+                current_batch_size = labels.shape[0]
+                time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
+                
+                # Report stats periodically
                 if (i + 1) % 2 == 0 or i == num_batches - 1:
-                    print(f"  Processed batch {i + 1}/{num_batches}")
-        
-        total_time = time.time() - start_time
+                    print(f"  Processed batch {i + 1}/{num_batches} | "
+                          f"Batch time: {batch_time:.3f}s | "
+                          f"Avg time/image: {time_per_image * 1000:.2f}ms")
+
+                # Reset start time for the *next* batch processing
+                batch_start_time = time.time()
+
+        total_time = time.time() - total_start_time
         print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
