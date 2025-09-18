@@ -333,37 +333,63 @@ class SHFQuadtreeTransform:
             ])
 
     def __call__(self, pil_img):
-        # --- [关键修复] ---
-        # 确保所有图像都是3通道RGB格式，以处理数据集中的灰度图
-        if pil_img.mode != 'RGB':
-            pil_img = pil_img.convert('RGB')
-        # -------------------
-        # 1. 应用基础的PIL数据增强
-        augmented_pil = self.base_transform(pil_img)
-        
-        # 2. 将PIL图像转换为NumPy数组以进行cv2处理 (RGB -> BGR)
-        img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
-        
-        # 3. 应用自定义的ImagePatchify逻辑
-        seq_patches, seq_sizes, seq_pos, _ = self.patchify(img_np)
-        
-        # 4. 将结果转换为Tensors
-        import pdb;pdb.set_trace()
-        patches_np = np.stack(seq_patches, axis=0)
-        patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
+            try:
+                # --- [关键修复] ---
+                # 确保所有图像都是3通道RGB格式，以处理数据集中的灰度图
+                if pil_img.mode != 'RGB':
+                    pil_img = pil_img.convert('RGB')
+                # -------------------
 
-        sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
-        positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
-        
-        # 5. 手动进行归一化
-        normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
-        patches_tensor_normalized = normalize(patches_tensor / 255.0)
+                # 1. 应用基础的PIL数据增强
+                augmented_pil = self.base_transform(pil_img)
+                
+                # 2. 将PIL图像转换为NumPy数组以进行cv2处理 (RGB -> BGR)
+                img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
+                
+                # --- [调试打印] ---
+                # print(f"[Debug] Shape of img_np: {img_np.shape}, Dtype: {img_np.dtype}")
 
-        return {
-            "patches": patches_tensor_normalized,
-            "sizes": sizes_tensor,
-            "positions": positions_tensor
-        }
+                # 3. 应用自定义的ImagePatchify逻辑
+                # [修正] ImagePatchify 返回 3 个值
+                seq_patches, seq_sizes, seq_pos = self.patchify(img_np)
+                
+                # 4. 将结果转换为Tensors
+                # --- [调试打印] ---
+                # if seq_patches and isinstance(seq_patches[0], np.ndarray):
+                #     print(f"[Debug] Shape of first patch in seq_patches: {seq_patches[0].shape}")
+                
+                patches_np = np.stack(seq_patches, axis=0)
+                
+                # --- [调试打印] ---
+                # print(f"[Debug] Shape of patches_np after stacking: {patches_np.shape}")
+
+                patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
+
+                sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
+                positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
+                
+                # 5. 手动进行归一化
+                normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
+                patches_tensor_normalized = normalize(patches_tensor / 255.0)
+
+                return {
+                    "patches": patches_tensor_normalized,
+                    "sizes": sizes_tensor,
+                    "positions": positions_tensor
+                }
+            except Exception as e:
+                print(f"--- ERROR in DataLoader Worker ---")
+                # 打印更多上下文信息以帮助调试
+                print(f"Error type: {type(e).__name__}")
+                print(f"Error message: {e}")
+                if 'img_np' in locals():
+                    print(f"Shape of img_np that caused error: {img_np.shape}")
+                if 'seq_patches' in locals() and seq_patches:
+                    # 检查第一个图像块的形状
+                    print(f"Shape of the first patch in seq_patches: {seq_patches[0].shape}")
+                if 'patches_np' in locals():
+                    print(f"Shape of patches_np that caused error: {patches_np.shape}")
+                raise e # 重新抛出异常，以便DataLoader可以处理它
 
 # --- 主Dataloader构建函数 ---
 def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32):
