@@ -406,3 +406,34 @@ class ImagePatchify:
         )
         # 返回qdt以便于在transform中获取坐标信息
         return seq_patches, seq_sizes, seq_pos, qdt
+
+from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+
+# --- 可视化和反序列化辅助函数 ---
+def denormalize(tensor, mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD):
+    """将一个张量反归一化以便于显示。"""
+    mean = torch.tensor(mean).view(3, 1, 1)
+    std = torch.tensor(std).view(3, 1, 1)
+    tensor = tensor.cpu() * std + mean
+    tensor = torch.clamp(tensor, 0, 1)
+    return tensor.permute(1, 2, 0).numpy()
+
+def deserialize_patches(patches_tensor, coords_tensor, image_size):
+    """从序列化的图块中重建图像。"""
+    reconstructed_img = np.zeros((image_size, image_size, 3), dtype=np.float32)
+    
+    # 首先反归一化所有图块
+    denormalized_patches = denormalize(patches_tensor)
+    
+    for i in range(patches_tensor.shape[0]):
+        patch_np = denormalized_patches[i]
+        x1, x2, y1, y2 = coords_tensor[i].numpy()
+        
+        width, height = x2 - x1, y2 - y1
+        if width == 0 or height == 0: continue
+
+        # 将图块调整回其在四叉树中的原始尺寸
+        resized_patch = cv2.resize(patch_np, (width, height), interpolation=cv2.INTER_CUBIC)
+        reconstructed_img[y1:y2, x1:x2, :] = resized_patch
+        
+    return np.clip(reconstructed_img, 0, 1)

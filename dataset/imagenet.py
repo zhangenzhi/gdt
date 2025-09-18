@@ -675,15 +675,22 @@ def imagenet_iter(args):
     
     
 # --- 使用示例与健全性检查 ---
+# --- 使用示例与健全性检查 ---
 if __name__ == '__main__':
+    from gdt.shf import denormalize,deserialize_patches
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径。')
+    parser.add_argument('--data_dir', type=str, required=True, help='ImageNet数据集的路径。')
     parser.add_argument('--batch_size', type=int, default=4, help='用于测试的批次大小。')
     parser.add_argument('--num_workers', type=int, default=2, help='工作线程数。')
+    parser.add_argument('--visualize', action='store_true', help='生成并保存一个批次的可视化结果。')
     args = parser.parse_args()
-
+    
+    img_size = 224
     dataloaders = build_shf_imagenet_dataloader(
-        img_size=256,
+        img_size=img_size,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers
@@ -692,26 +699,63 @@ if __name__ == '__main__':
     print("\n--- Dataloader健全性检查 ---")
     print("正在从训练集中获取一个批次...")
     
-    # [关键修复] ImageNet Dataloader 会返回一个元组 (数据字典, 标签)
-    # 我们需要将它们解包
     batch_dict, labels = next(iter(dataloaders['train']))
     
     print("批次获取成功！")
-    print("批次中的键:", batch_dict.keys())
-    
-    patches = batch_dict['patches']
-    sizes = batch_dict['sizes']
-    positions = batch_dict['positions']
-    
-    print(f"\n'patches'张量的形状: {patches.shape}")
-    print(f"'sizes'张量的形状: {sizes.shape}")
-    print(f"'positions'张量的形状: {positions.shape}")
-    print(f"'labels'张量的形状: {labels.shape}")
 
-    assert patches.shape == (args.batch_size, 196, 3, 16, 16)
-    assert sizes.shape == (args.batch_size, 196)
-    assert positions.shape == (args.batch_size, 196, 2)
-    assert labels.shape == (args.batch_size,)
-    
-    print("\n✅ 所有形状都正确！")
-    print("健全性检查通过。")
+    if args.visualize:
+        # 从批次中选择第一个样本进行可视化
+        original_img_tensor = batch_dict['original_image'][0]
+        patches_tensor = batch_dict['patches'][0]
+        coords_tensor = batch_dict['coords'][0]
+
+        # 1. 获取原始图像
+        original_image_np = denormalize(original_img_tensor)
+        
+        # 2. 从序列化图块中重建图像
+        reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
+
+        # 3. 创建并保存可视化图
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle("SHF Dataloader 可视化检查", fontsize=16)
+
+        axes[0].imshow(original_image_np)
+        axes[0].set_title("原始增强图")
+        axes[0].axis('off')
+
+        axes[1].imshow(original_image_np)
+        axes[1].set_title("四叉树分割图")
+        axes[1].axis('off')
+        for i in range(coords_tensor.shape[0]):
+            x1, x2, y1, y2 = coords_tensor[i].numpy()
+            if x2 - x1 > 0: # 只绘制有效图块的边框
+                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
+                axes[1].add_patch(rect)
+
+        axes[2].imshow(reconstructed_image_np)
+        axes[2].set_title("重建图")
+        axes[2].axis('off')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        save_path = "shf_dataloader_visualization.png"
+        plt.savefig(save_path)
+        print(f"\n✅ 可视化结果已保存至: {save_path}")
+
+    else:
+        # 如果不进行可视化，则执行标准的形状检查
+        print("批次中的键:", batch_dict.keys())
+        patches = batch_dict['patches']
+        sizes = batch_dict['sizes']
+        positions = batch_dict['positions']
+        
+        print(f"\n'patches'张量的形状: {patches.shape}")
+        print(f"'sizes'张量的形状: {sizes.shape}")
+        print(f"'positions'张量的形状: {positions.shape}")
+        print(f"'labels'张量的形状: {labels.shape}")
+
+        assert patches.shape == (args.batch_size, (img_size//16)**2, 3, 16, 16)
+        assert sizes.shape == (args.batch_size, (img_size//16)**2)
+        assert positions.shape == (args.batch_size, (img_size//16)**2, 2)
+        assert labels.shape == (args.batch_size,)
+        
+        print("\n✅ 所有形状都正确！健全性检查通过。")
