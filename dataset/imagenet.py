@@ -549,7 +549,8 @@ if __name__ == "__main__":
     dataloaders = imagenet(args)
     
     import time
-    for i in range(3):
+    for i in range(args.num_epochs):
+        print("Current epochs: {} --------".format(i))
         start_time = time.time()
         for phase in ['train', 'val']:
             for step, (inputs, labels) in enumerate(dataloaders[phase]):
