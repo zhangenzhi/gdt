@@ -682,7 +682,7 @@ import time
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader.')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for DataLoader.')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader.')
     parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
     args = parser.parse_args()
@@ -745,7 +745,7 @@ if __name__ == '__main__':
             print(f"\nIterating over {phase} set...")
             num_batches = len(dataloaders[phase])
             for i, (batch_dict, labels) in enumerate(dataloaders[phase]):
-                if (i + 1) % 100 == 0 or i == num_batches - 1:
+                if (i + 1) % 10 == 0 or i == num_batches - 1:
                     print(f"  Processed batch {i + 1}/{num_batches}")
         
         total_time = time.time() - start_time
