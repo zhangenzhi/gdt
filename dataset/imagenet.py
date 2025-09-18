@@ -346,7 +346,7 @@ class SHFQuadtreeTransform:
         img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
         
         # 3. 应用自定义的ImagePatchify逻辑
-        seq_patches, seq_sizes, seq_pos = self.patchify(img_np)
+        seq_patches, seq_sizes, seq_pos, _ = self.patchify(img_np)
         
         # 4. 将结果转换为Tensors
         patches_np = np.stack(seq_patches, axis=0)
