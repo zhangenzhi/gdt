@@ -338,7 +338,8 @@ class SHFQuadtreeTransform:
         if pil_img.mode != 'RGB':
             pil_img = pil_img.convert('RGB')
         # -------------------
-
+        import pdb;pdb.set_trace
+        
         # 1. 应用基础的PIL数据增强
         augmented_pil = self.base_transform(pil_img)
         
