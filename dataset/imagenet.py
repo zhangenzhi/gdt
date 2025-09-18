@@ -745,7 +745,7 @@ if __name__ == '__main__':
             print(f"\nIterating over {phase} set...")
             num_batches = len(dataloaders[phase])
             for i, (batch_dict, labels) in enumerate(dataloaders[phase]):
-                if (i + 1) % 10 == 0 or i == num_batches - 1:
+                if (i + 1) % 2 == 0 or i == num_batches - 1:
                     print(f"  Processed batch {i + 1}/{num_batches}")
         
         total_time = time.time() - start_time
