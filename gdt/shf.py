@@ -409,37 +409,34 @@ class ImagePatchify:
 
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-# --- 可视化和反序列化辅助函数 ---
+# --- Visualization and deserialization helper functions ---
 def denormalize(tensor, mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD):
-    """
-    将一个张量反归一化以便于显示。
-    [关键修复]：此函数现在可以同时处理3D（单张图）和4D（图块序列）的张量。
-    """
+    """Denormalizes a tensor for display."""
     mean = torch.tensor(mean)
     std = torch.tensor(std)
 
-    if tensor.ndim == 4: # 批次的图块 [N, C, H, W]
+    if tensor.ndim == 4: # Batch of patches [N, C, H, W]
         mean = mean.view(1, 3, 1, 1)
         std = std.view(1, 3, 1, 1)
         tensor = tensor.cpu() * std + mean
         tensor = torch.clamp(tensor, 0, 1)
         return tensor.permute(0, 2, 3, 1).numpy() # -> [N, H, W, C]
-    elif tensor.ndim == 3: # 单张图 [C, H, W]
+    elif tensor.ndim == 3: # Single image [C, H, W]
         mean = mean.view(3, 1, 1)
         std = std.view(3, 1, 1)
         tensor = tensor.cpu() * std + mean
         tensor = torch.clamp(tensor, 0, 1)
         return tensor.permute(1, 2, 0).numpy() # -> [H, W, C]
     else:
-        raise TypeError(f"不支持的张量维度: {tensor.ndim}")
+        raise TypeError(f"Unsupported tensor dimension: {tensor.ndim}")
 
 
 def deserialize_patches(patches_tensor, coords_tensor, image_size):
-    """从序列化的图块中重建图像。"""
+    """Reconstructs an image from serialized patches."""
     reconstructed_img = np.zeros((image_size, image_size, 3), dtype=np.float32)
     
-    # 首先反归一化所有图块
-    denormalized_patches = denormalize(patches_tensor) # 现在这个调用是安全的
+    # First, denormalize all patches
+    denormalized_patches = denormalize(patches_tensor) # This call is now safe
     
     for i in range(patches_tensor.shape[0]):
         patch_np = denormalized_patches[i]
@@ -448,7 +445,7 @@ def deserialize_patches(patches_tensor, coords_tensor, image_size):
         width, height = x2 - x1, y2 - y1
         if width == 0 or height == 0: continue
 
-        # 将图块调整回其在四叉树中的原始尺寸
+        # Resize the patch back to its original size in the quadtree
         resized_patch = cv2.resize(patch_np, (width, height), interpolation=cv2.INTER_CUBIC)
         reconstructed_img[y1:y2, x1:x2, :] = resized_patch
         
