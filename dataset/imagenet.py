@@ -549,14 +549,15 @@ if __name__ == "__main__":
     dataloaders = imagenet(args)
     
     import time
-    start_time = time.time()
-    for phase in ['train', 'val']:
-        for step, (inputs, labels) in enumerate(dataloaders[phase]):
-            if step % 100 == 0:
-                # 为了验证，可以打印出变量的类型和形状
-                print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+    for i in range(3):
+        start_time = time.time()
+        for phase in ['train', 'val']:
+            for step, (inputs, labels) in enumerate(dataloaders[phase]):
+                if step % 100 == 0:
+                    # 为了验证，可以打印出变量的类型和形状
+                    print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
-    print("Time cost for loading {}".format(time.time() - start_time))
+        print("Time cost for loading {}".format(time.time() - start_time))
 
 # if __name__ == '__main__':
 #     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
