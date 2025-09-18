@@ -347,7 +347,7 @@ class SHFQuadtreeTransform:
                 img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
                 
                 # --- [调试打印] ---
-                # print(f"[Debug] Shape of img_np: {img_np.shape}, Dtype: {img_np.dtype}")
+                print(f"[Debug] Shape of img_np: {img_np.shape}, Dtype: {img_np.dtype}")
 
                 # 3. 应用自定义的ImagePatchify逻辑
                 # [修正] ImagePatchify 返回 3 个值
@@ -355,13 +355,13 @@ class SHFQuadtreeTransform:
                 
                 # 4. 将结果转换为Tensors
                 # --- [调试打印] ---
-                # if seq_patches and isinstance(seq_patches[0], np.ndarray):
-                #     print(f"[Debug] Shape of first patch in seq_patches: {seq_patches[0].shape}")
+                if seq_patches and isinstance(seq_patches[0], np.ndarray):
+                    print(f"[Debug] Shape of first patch in seq_patches: {seq_patches[0].shape}")
                 
                 patches_np = np.stack(seq_patches, axis=0)
                 
                 # --- [调试打印] ---
-                # print(f"[Debug] Shape of patches_np after stacking: {patches_np.shape}")
+                print(f"[Debug] Shape of patches_np after stacking: {patches_np.shape}")
 
                 patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
 
@@ -704,8 +704,8 @@ def imagenet_iter(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径。')
-    parser.add_argument('--batch_size', type=int, default=1024, help='用于测试的批次大小。')
-    parser.add_argument('--num_workers', type=int, default=32, help='工作线程数。')
+    parser.add_argument('--batch_size', type=int, default=4, help='用于测试的批次大小。')
+    parser.add_argument('--num_workers', type=int, default=1, help='工作线程数。')
     args = parser.parse_args()
 
     dataloaders = build_shf_imagenet_dataloader(
