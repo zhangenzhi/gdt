@@ -301,7 +301,7 @@ import PIL
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-# --- 集成了timm数据增强的自定义Transform类 ---
+ --- 集成了timm数据增强的自定义Transform类 ---
 class SHFQuadtreeTransform:
     def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
         """
@@ -347,7 +347,7 @@ class SHFQuadtreeTransform:
         img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
         
         # 3. 应用自定义的ImagePatchify逻辑
-        seq_patches, seq_sizes, seq_pos, _ = self.patchify(img_np)
+        seq_patches, seq_sizes, seq_pos = self.patchify(img_np)
         
         # 4. 将结果转换为Tensors
         patches_np = np.stack(seq_patches, axis=0)
@@ -371,11 +371,9 @@ def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32
     fixed_length = (img_size // 16) ** 2 # 假设patch大小为16
     patch_size = 16
 
-    # 为训练和验证创建timm数据增强的参数
     train_transform_args = ImagenetTransformArgs(input_size=img_size)
     val_transform_args = ImagenetTransformArgs(input_size=img_size)
 
-    # 创建集成了timm的自定义Transform
     data_transforms = {
         'train': SHFQuadtreeTransform(is_train=True, transform_args=train_transform_args, fixed_length=fixed_length, patch_size=patch_size),
         'val': SHFQuadtreeTransform(is_train=False, transform_args=val_transform_args, fixed_length=fixed_length, patch_size=patch_size)
