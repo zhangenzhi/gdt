@@ -302,6 +302,36 @@ class Rect:
                                  linewidth=lw, edgecolor=c, facecolor='none')
         ax.add_patch(rect)
 
+class Rect:
+    def __init__(self, x1, x2, y1, y2) -> None:
+        self.x1 = int(x1); self.x2 = int(x2); self.y1 = int(y1); self.y2 = int(y2)
+        assert self.x1 <= self.x2, 'x1 > x2, wrong coordinate.'
+        assert self.y1 <= self.y2, 'y1 > y2, wrong coordinate.'
+    
+    def contains(self, domain):
+        if self.y1 >= self.y2 or self.x1 >= self.x2: return 0
+        patch = domain[self.y1:self.y2, self.x1:self.x2]
+        return int(np.sum(patch)/255)
+    
+    def get_area(self, img):
+        return img[self.y1:self.y2, self.x1:self.x2, :]
+    
+    def get_coord(self):
+        return self.x1, self.x2, self.y1, self.y2
+    
+    def get_size(self):
+        return self.x2 - self.x1, self.y2 - self.y1
+    
+    def get_center(self):
+        return (self.x2 + self.x1) / 2, (self.y2 + self.y1) / 2
+    
+    def draw(self, ax, c='cyan', lw=1, **kwargs):
+        rect = patches.Rectangle((self.x1, self.y1), 
+                                 width=self.x2-self.x1, 
+                                 height=self.y2-self.y1, 
+                                 linewidth=lw, edgecolor=c, facecolor='none')
+        ax.add_patch(rect)
+
 class FixedQuadTree:
     def __init__(self, domain, fixed_length=128) -> None:
         self.domain = domain
@@ -315,22 +345,24 @@ class FixedQuadTree:
         self.nodes = [[root, root.contains(self.domain)]]
         
         while len(self.nodes) < self.fixed_length:
+            # --- [CRITICAL FIX] ---
+            # Implemented a robust tree-building logic that prevents infinite loops.
             try:
+                # Find the best candidate node to split based on its value (e.g., edge count)
                 bbox, value = max(self.nodes, key=lambda x: x[1])
             except ValueError:
-                break # 没有可分裂的节点
+                # This happens if self.nodes becomes empty, which shouldn't occur in this logic, but is a safe exit.
+                break
 
-            idx = self.nodes.index([bbox, value])
-            
             width, height = bbox.get_size()
-            if width < 2 or height < 2 or value == 0:
-                # 找到下一个最佳分裂点
-                temp_nodes = self.nodes[:idx] + self.nodes[idx+1:]
-                if not temp_nodes: break
-                
-                # 为了避免无限循环，我们将当前节点的值设为-1，以便不再选择它
-                self.nodes[idx][1] = -1
-                continue
+
+            # If the best candidate is too small to split or has no value (no edges),
+            # then no other nodes are better candidates, so we should stop the tree building process.
+            if width < 2 or height < 2 or value <= 0:
+                break # Exit the loop cleanly.
+
+            # Find the index of the node to replace
+            idx = self.nodes.index([bbox, value])
 
             x1, x2, y1, y2 = bbox.get_coord()
             cx = x1 + width // 2
@@ -347,7 +379,9 @@ class FixedQuadTree:
                 child_val = child_rect.contains(self.domain)
                 new_nodes.append([child_rect, child_val])
             
+            # Replace the parent node with its four children in the list
             self.nodes = self.nodes[:idx] + new_nodes + self.nodes[idx+1:]
+            # -----------------------------------------------------------------
 
     def serialize(self, img, patch_size, num_channels):
         seq_patch = []
