@@ -677,19 +677,14 @@ def imagenet_iter(args):
     
 #     total_time = time.time() - start_time
 #     print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")
+import time    
     
-    
-# --- 使用示例与健全性检查 ---
 if __name__ == '__main__':
-    from gdt.shf import denormalize,deserialize_patches
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='ImageNet数据集的路径。')
-    parser.add_argument('--batch_size', type=int, default=1024, help='用于测试的批次大小。')
-    parser.add_argument('--num_workers', type=int, default=32, help='工作线程数。')
-    parser.add_argument('--visualize', action='store_true', help='生成并保存一个批次的可视化结果。')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
+    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader.')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader.')
+    parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
     args = parser.parse_args()
     
     img_size = 256
@@ -700,26 +695,23 @@ if __name__ == '__main__':
         num_workers=args.num_workers
     )
 
-    print("\n--- Dataloader健全性检查 ---")
-    print("正在从训练集中获取一个批次...")
+    print("\n--- Dataloader Sanity Check ---")
     
-    batch_dict, labels = next(iter(dataloaders['train']))
-    
-    print("批次获取成功！")
-
     if args.visualize:
-        # Select the first sample from the batch for visualization
+        from gdt.shf import denormalize, deserialize_patches
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        print("Fetching one batch from the validation set for visualization...")
+        batch_dict, labels = next(iter(dataloaders['val']))
+        print("Batch fetched successfully!")
+        
         original_img_tensor = batch_dict['original_image'][0]
         patches_tensor = batch_dict['patches'][0]
         coords_tensor = batch_dict['coords'][0]
 
-        # 1. Get the original image
         original_image_np = denormalize(original_img_tensor)
-        
-        # 2. Reconstruct the image from serialized patches
         reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
 
-        # 3. Create and save the visualization plot
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
 
@@ -732,7 +724,7 @@ if __name__ == '__main__':
         axes[1].axis('off')
         for i in range(coords_tensor.shape[0]):
             x1, x2, y1, y2 = coords_tensor[i].numpy()
-            if x2 - x1 > 0: # Only draw borders for valid patches
+            if x2 - x1 > 0:
                 rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
                 axes[1].add_patch(rect)
 
@@ -746,20 +738,15 @@ if __name__ == '__main__':
         print(f"\n✅ Visualization saved to: {save_path}")
 
     else:
-        # If not visualizing, perform the standard shape check
-        print("Keys in batch:", batch_dict.keys())
-        patches = batch_dict['patches']
-        sizes = batch_dict['sizes']
-        positions = batch_dict['positions']
+        print("--- Full Iteration Speed Test ---")
+        start_time = time.time()
         
-        print(f"\nShape of 'patches' tensor: {patches.shape}")
-        print(f"Shape of 'sizes' tensor: {sizes.shape}")
-        print(f"Shape of 'positions' tensor: {positions.shape}")
-        print(f"Shape of 'labels' tensor: {labels.shape}")
-
-        assert patches.shape == (args.batch_size, (img_size//16)**2, 3, 16, 16)
-        assert sizes.shape == (args.batch_size, (img_size//16)**2)
-        assert positions.shape == (args.batch_size, (img_size//16)**2, 2)
-        assert labels.shape == (args.batch_size,)
+        for phase in ['train', 'val']:
+            print(f"\nIterating over {phase} set...")
+            num_batches = len(dataloaders[phase])
+            for i, (batch_dict, labels) in enumerate(dataloaders[phase]):
+                if (i + 1) % 100 == 0 or i == num_batches - 1:
+                    print(f"  Processed batch {i + 1}/{num_batches}")
         
-        print("\n✅ All shapes are correct! Sanity check passed.")
+        total_time = time.time() - start_time
+        print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
