@@ -14,27 +14,18 @@ import random
 import shutil
 from tqdm import tqdm
 
+from dataset.transform import ImagenetTransformArgs, build_transform
 def imagenet(args):
-
-    # Define data transformations
+    # 数据增强部分保持不变
     data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'val': transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
+        'train':build_transform(is_train=True, args=ImagenetTransformArgs(input_size=224)),
+        'val': build_transform(is_train=False, args=ImagenetTransformArgs(input_size=224))
     }
 
-    # Create datasets
+    # 创建数据集
     image_datasets = {x: datasets.ImageNet(root=args.data_dir, split=x, transform=data_transforms[x])
                       for x in ['train', 'val']}
+                      
     
     # Convert datasets to InMemoryDataset
     # in_memory_datasets = {x: InMemoryDataset(image_datasets[x]) for x in ['train', 'val']}
@@ -48,16 +39,14 @@ def imagenet(args):
                    for x in ['train', 'val']}
     return dataloaders
 
-from dataset.transform import ImagenetTransformArgs, build_transform
-# 建议将 num_workers 作为参数传入，而不是依赖外部的 args
 def imagenet_distribute(img_size, data_dir, batch_size, num_workers=32):
     """
     为分布式训练优化的ImageNet DataLoader函数
     """
     # 数据增强部分保持不变
     data_transforms = {
-        'train':build_transform(is_train=True, args=ImagenetTransformArgs(input_size=224)),
-        'val': build_transform(is_train=False, args=ImagenetTransformArgs(input_size=224))
+        'train':build_transform(is_train=True, args=ImagenetTransformArgs(input_size=img_size)),
+        'val': build_transform(is_train=False, args=ImagenetTransformArgs(input_size=img_size))
     }
 
     # 创建数据集
@@ -141,10 +130,6 @@ from gdt.hde import HierarchicalHDEProcessor
 # --- 辅助函数：将 PyTorch 张量转换为 OpenCV 图像 ---
 
 def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-    """
-    将一个PyTorch张量（归一化，CHW）转换为一个NumPy数组（HWC，uint8），
-    以便OpenCV使用。
-    """
     inv_normalize = transforms.Normalize(
         mean=[-m/s for m, s in zip(mean, std)],
         std=[1/s for s in std]
@@ -158,10 +143,6 @@ def tensor_to_cv2_img(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.2
 # --- 用于HDE的自定义PyTorch数据集 ---
 
 class HDEImageNetDataset(Dataset):
-    """
-    一个自定义的PyTorch数据集，它包装了ImageNet数据集。
-    对于每张图像，它都会执行完整的HDE预处理流程，使用最新的HierarchicalHDEProcessor。
-    """
     def __init__(self, underlying_dataset, fixed_length=256, patch_size=16, visible_fraction=0.25):
         self.underlying_dataset = underlying_dataset
         self.fixed_length = fixed_length
@@ -534,31 +515,31 @@ def imagenet_iter(args):
         print("Time cost for loading {}".format(time.time() - start_time))
            
 
-if __name__ == "__main__":
-    # 假设 args 已经通过某个函数（如 parse_args()）正确设置
-    parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
-    parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
-    # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
-    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
-    parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
-    parser.add_argument('--batch_size', type=int, default=2048, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader')
+# if __name__ == "__main__":
+#     # 假设 args 已经通过某个函数（如 parse_args()）正确设置
+#     parser = argparse.ArgumentParser(description='PyTorch ImageNet DataLoader Example')
+#     parser.add_argument('--task', type=str, default='imagenet', help='Type of task')
+#     # parser.add_argument('--data_dir', type=str, default='/Volumes/data/dataset/imagenet', help='Path to the ImageNet dataset directory')
+#     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
+#     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
+#     parser.add_argument('--batch_size', type=int, default=2048, help='Batch size for DataLoader')
+#     parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader')
     
-    args = parser.parse_args()
+#     args = parser.parse_args()
     
-    dataloaders = imagenet(args)
+#     dataloaders = imagenet(args)
     
-    import time
-    for i in range(args.num_epochs):
-        print("Current epochs: {} --------".format(i))
-        start_time = time.time()
-        for phase in ['train', 'val']:
-            for step, (inputs, labels) in enumerate(dataloaders[phase]):
-                if step % 100 == 0:
-                    # 为了验证，可以打印出变量的类型和形状
-                    print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+#     import time
+#     for i in range(args.num_epochs):
+#         print("Current epochs: {} --------".format(i))
+#         start_time = time.time()
+#         for phase in ['train', 'val']:
+#             for step, (inputs, labels) in enumerate(dataloaders[phase]):
+#                 if step % 100 == 0:
+#                     # 为了验证，可以打印出变量的类型和形状
+#                     print(f"Phase: {phase}, Step: {step}, Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
-        print("Time cost for loading {}".format(time.time() - start_time))
+#         print("Time cost for loading {}".format(time.time() - start_time))
 
 # if __name__ == '__main__':
 #     parser = argparse.ArgumentParser(description="Create a subset of ImageNet for testing.")
@@ -680,94 +661,94 @@ if __name__ == "__main__":
 #     total_time = time.time() - start_time
 #     print(f"\n加载 {args.num_epochs} 轮次的部分数据所花费的总时间: {total_time:.2f} 秒")    
     
-# if __name__ == '__main__':
-#     import time
-#     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
-#     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
-#     parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader.')
-#     parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader.')
-#     parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
-#     args = parser.parse_args()
+if __name__ == '__main__':
+    import time
+    parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
+    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for DataLoader.')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader.')
+    parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
+    args = parser.parse_args()
     
-#     img_size = 256
-#     dataloaders = build_shf_imagenet_dataloader(
-#         img_size=img_size,
-#         data_dir=args.data_dir,
-#         batch_size=args.batch_size,
-#         num_workers=args.num_workers
-#     )
+    img_size = 256
+    dataloaders = build_shf_imagenet_dataloader(
+        img_size=img_size,
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers
+    )
 
-#     print("\n--- Dataloader Sanity Check ---")
+    print("\n--- Dataloader Sanity Check ---")
     
-#     if args.visualize:
-#         from gdt.shf import denormalize, deserialize_patches
-#         import matplotlib.pyplot as plt
-#         import matplotlib.patches as patches
-#         print("Fetching one batch from the validation set for visualization...")
-#         batch_dict, labels = next(iter(dataloaders['val']))
-#         print("Batch fetched successfully!")
+    if args.visualize:
+        from gdt.shf import denormalize, deserialize_patches
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        print("Fetching one batch from the validation set for visualization...")
+        batch_dict, labels = next(iter(dataloaders['val']))
+        print("Batch fetched successfully!")
         
-#         original_img_tensor = batch_dict['original_image'][0]
-#         patches_tensor = batch_dict['patches'][0]
-#         coords_tensor = batch_dict['coords'][0]
+        original_img_tensor = batch_dict['original_image'][0]
+        patches_tensor = batch_dict['patches'][0]
+        coords_tensor = batch_dict['coords'][0]
 
-#         original_image_np = denormalize(original_img_tensor)
-#         reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
+        original_image_np = denormalize(original_img_tensor)
+        reconstructed_image_np = deserialize_patches(patches_tensor, coords_tensor, img_size)
 
-#         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-#         fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle("SHF Dataloader Visualization Check", fontsize=16)
 
-#         axes[0].imshow(original_image_np)
-#         axes[0].set_title("Original Augmented Image")
-#         axes[0].axis('off')
+        axes[0].imshow(original_image_np)
+        axes[0].set_title("Original Augmented Image")
+        axes[0].axis('off')
 
-#         axes[1].imshow(original_image_np)
-#         axes[1].set_title("Quadtree Grid")
-#         axes[1].axis('off')
-#         for i in range(coords_tensor.shape[0]):
-#             x1, x2, y1, y2 = coords_tensor[i].numpy()
-#             if x2 - x1 > 0:
-#                 rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
-#                 axes[1].add_patch(rect)
+        axes[1].imshow(original_image_np)
+        axes[1].set_title("Quadtree Grid")
+        axes[1].axis('off')
+        for i in range(coords_tensor.shape[0]):
+            x1, x2, y1, y2 = coords_tensor[i].numpy()
+            if x2 - x1 > 0:
+                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='cyan', facecolor='none')
+                axes[1].add_patch(rect)
 
-#         axes[2].imshow(reconstructed_image_np)
-#         axes[2].set_title("Reconstructed Image")
-#         axes[2].axis('off')
+        axes[2].imshow(reconstructed_image_np)
+        axes[2].set_title("Reconstructed Image")
+        axes[2].axis('off')
 
-#         plt.tight_layout(rect=[0, 0, 1, 0.95])
-#         save_path = "shf_dataloader_visualization.png"
-#         plt.savefig(save_path)
-#         print(f"\n✅ Visualization saved to: {save_path}")
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        save_path = "shf_dataloader_visualization.png"
+        plt.savefig(save_path)
+        print(f"\n✅ Visualization saved to: {save_path}")
 
-#     else:
-#         print("--- Full Iteration Speed Test ---")
-#         total_start_time = time.time()
+    else:
+        print("--- Full Iteration Speed Test ---")
+        total_start_time = time.time()
         
-#         for phase in ['train', 'val']:
-#             print(f"\nIterating over {phase} set...")
-#             num_batches = len(dataloaders[phase])
+        for phase in ['train', 'val']:
+            print(f"\nIterating over {phase} set...")
+            num_batches = len(dataloaders[phase])
             
-#             # Use an iterator to manually pull batches for precise timing
-#             data_iter = iter(dataloaders[phase])
-#             batch_start_time = time.time() # Initialize before the loop
+            # Use an iterator to manually pull batches for precise timing
+            data_iter = iter(dataloaders[phase])
+            batch_start_time = time.time() # Initialize before the loop
             
-#             for i in range(num_batches):
-#                 # Fetching the batch is the main work we want to time
-#                 batch_dict, labels = next(data_iter)
-#                 batch_end_time = time.time()
+            for i in range(num_batches):
+                # Fetching the batch is the main work we want to time
+                batch_dict, labels = next(data_iter)
+                batch_end_time = time.time()
                 
-#                 batch_time = batch_end_time - batch_start_time
-#                 current_batch_size = labels.shape[0]
-#                 time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
+                batch_time = batch_end_time - batch_start_time
+                current_batch_size = labels.shape[0]
+                time_per_image = batch_time / current_batch_size if current_batch_size > 0 else 0
                 
-#                 # Report stats periodically
-#                 if (i + 1) % 2 == 0 or i == num_batches - 1:
-#                     print(f"  Processed batch {i + 1}/{num_batches} | "
-#                           f"Batch time: {batch_time:.3f}s | "
-#                           f"Avg time/image: {time_per_image * 1000:.2f}ms")
+                # Report stats periodically
+                if (i + 1) % 2 == 0 or i == num_batches - 1:
+                    print(f"  Processed batch {i + 1}/{num_batches} | "
+                          f"Batch time: {batch_time:.3f}s | "
+                          f"Avg time/image: {time_per_image * 1000:.2f}ms")
 
-#                 # Reset start time for the *next* batch processing
-#                 batch_start_time = time.time()
+                # Reset start time for the *next* batch processing
+                batch_start_time = time.time()
 
-#         total_time = time.time() - total_start_time
-#         print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
+        total_time = time.time() - total_start_time
+        print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
