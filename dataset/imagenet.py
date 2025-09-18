@@ -301,7 +301,6 @@ import PIL
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
- --- 集成了timm数据增强的自定义Transform类 ---
 class SHFQuadtreeTransform:
     def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
         """
