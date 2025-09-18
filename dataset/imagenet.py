@@ -664,8 +664,8 @@ if __name__ == '__main__':
     import time
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for DataLoader.')
-    parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader.')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for DataLoader.')
+    parser.add_argument('--num_workers', type=int, default=48, help='Number of workers for DataLoader.')
     parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
     args = parser.parse_args()
     
@@ -743,11 +743,11 @@ if __name__ == '__main__':
                 # Report stats periodically
                 if (i + 1) % 100 == 0 or i == num_batches - 1:
                     print(f"  Processed batch {i + 1}/{num_batches} | "
-                          f"Batch time: {batch_time:.3f}s | "
-                          f"Avg time/image: {time_per_image * 1000:.2f}ms")
+                          f"Batch time: {batch_time:.8f}s | "
+                          f"Avg time/image: {time_per_image * 1000:.8f}ms")
 
                 # Reset start time for the *next* batch processing
                 batch_start_time = time.time()
 
         total_time = time.time() - total_start_time
-        print(f"\n✅ Full iteration completed in {total_time:.2f} seconds.")
+        print(f"\n✅ Full iteration completed in {total_time:.8f} seconds.")
