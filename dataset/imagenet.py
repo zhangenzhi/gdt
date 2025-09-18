@@ -338,8 +338,6 @@ class SHFQuadtreeTransform:
         if pil_img.mode != 'RGB':
             pil_img = pil_img.convert('RGB')
         # -------------------
-        import pdb;pdb.set_trace
-        
         # 1. 应用基础的PIL数据增强
         augmented_pil = self.base_transform(pil_img)
         
@@ -350,6 +348,7 @@ class SHFQuadtreeTransform:
         seq_patches, seq_sizes, seq_pos, _ = self.patchify(img_np)
         
         # 4. 将结果转换为Tensors
+        import pdb;pdb.set_trace()
         patches_np = np.stack(seq_patches, axis=0)
         patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
 
