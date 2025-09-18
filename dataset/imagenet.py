@@ -301,6 +301,7 @@ import PIL
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
+# --- Custom Transform class with integrated timm augmentation ---
 class SHFQuadtreeTransform:
     def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
         self.base_transform = self._build_pil_transform(is_train, transform_args)
@@ -333,26 +334,30 @@ class SHFQuadtreeTransform:
         if augmented_pil.mode != 'RGB':
             augmented_pil = augmented_pil.convert('RGB')
         
-        img_np = cv2.cvtColor(np.array(augmented_pil), cv2.COLOR_RGB2BGR)
+        # --- [KEY CHANGE] ---
+        # Convert directly to a NumPy array without changing color space. It's now RGB.
+        img_np = np.array(augmented_pil)
         
         seq_patches, seq_sizes, seq_pos, qdt = self.patchify(img_np)
         
         patches_np = np.stack(seq_patches, axis=0)
+        # Permute from [N, P, P, 3(RGB)] to [N, 3(RGB), P, P]
         patches_tensor = torch.from_numpy(patches_np).permute(0, 3, 1, 2).float()
 
         sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
         positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
         
-        # 获取坐标用于可视化
+        # Get coordinates for visualization
         coords = [node[0].get_coord() for node in qdt.nodes]
         if len(coords) < self.patchify.fixed_length:
             padding_needed = self.patchify.fixed_length - len(coords)
             coords.extend([(0,0,0,0)] * padding_needed)
         coords_tensor = torch.tensor(coords, dtype=torch.long)
 
-        # 获取用于可视化的原始图像张量
+        # Get the original image tensor for visualization
         original_tensor = transforms.ToTensor()(augmented_pil)
         
+        # Apply normalization. The input tensor is now RGB, so this is correct.
         normalize = transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
         patches_tensor_normalized = normalize(patches_tensor / 255.0)
         original_tensor_normalized = normalize(original_tensor)
@@ -361,8 +366,8 @@ class SHFQuadtreeTransform:
             "patches": patches_tensor_normalized,
             "sizes": sizes_tensor,
             "positions": positions_tensor,
-            "coords": coords_tensor, # 新增
-            "original_image": original_tensor_normalized # 新增
+            "coords": coords_tensor, # Added
+            "original_image": original_tensor_normalized # Added
         }
 
 # --- 主Dataloader构建函数 ---

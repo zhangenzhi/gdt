@@ -385,26 +385,28 @@ class ImagePatchify:
         
     def __call__(self, img_np):
         if img_np.ndim == 2:
-            img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2RGB)
         elif img_np.ndim == 3 and img_np.shape[2] == 1:
-            img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2RGB)
 
         smooth_factor = random.choice(self.sths)
         
         if smooth_factor == 0:
             edges = (np.random.uniform(low=0, high=255, size=img_np.shape[:2])).astype(np.uint8)
         else:
-            grey_img = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+            # Convert RGB to Grayscale for Canny edge detection
+            grey_img = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
             blurred = cv2.GaussianBlur(grey_img, (smooth_factor, smooth_factor), 0)
             canny_t1 = random.choice(self.cannys)
             edges = cv2.Canny(blurred, canny_t1, canny_t1 * 2)
 
         qdt = FixedQuadTree(domain=edges, fixed_length=self.fixed_length)
         
+        # Serialization now operates on the RGB image
         seq_patches, seq_sizes, seq_pos = qdt.serialize(
             img_np, self.patch_size, self.num_channels
         )
-        # 返回qdt以便于在transform中获取坐标信息
+        # Return qdt to get coordinate information in the transform
         return seq_patches, seq_sizes, seq_pos, qdt
 
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
