@@ -136,7 +136,7 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     return dataloaders
 
 
-from gdt.hde import HierarchicalHDEProcessor, Rect
+from gdt.hde import HierarchicalHDEProcessor
 
 # --- 辅助函数：将 PyTorch 张量转换为 OpenCV 图像 ---
 
@@ -682,7 +682,7 @@ import time
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SHF Quadtree Dataloader with Timm Augmentation Test')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset.')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for DataLoader.')
+    parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader.')
     parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader.')
     parser.add_argument('--visualize', action='store_true', help='Generate and save a visualization of one batch.')
     args = parser.parse_args()
