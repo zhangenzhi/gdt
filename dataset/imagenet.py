@@ -542,7 +542,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_epochs', type=int, default=3, help='Epochs for iteration')
     parser.add_argument('--batch_size', type=int, default=4096, help='Batch size for DataLoader')
-    parser.add_argument('--num_workers', type=int, default=64, help='Number of workers for DataLoader')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     
     args = parser.parse_args()
     
