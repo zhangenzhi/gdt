@@ -1,7 +1,7 @@
 # Configuration for the Baseline Vision Transformer (ViT) Model
 
 # A name for this specific experiment run, used for creating output directories
-task_name: "shf_imagenet_local"
+task_name: "shf_imagenet"
 
 # 1. Model Architecture Configuration
 model:
@@ -28,7 +28,7 @@ training:
   eta_min: 0.000001
 
   num_epochs: 300
-  batch_size: 256 # batch per gpu
+  batch_size: 128 # batch per gpu
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器

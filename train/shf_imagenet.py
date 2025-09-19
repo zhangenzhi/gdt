@@ -126,6 +126,99 @@ def evaluate_shf_model(model, val_loader, device, is_ddp=False):
         
     return 100 * correct / total if total > 0 else 0
 
+def setup_ddp(rank, world_size):
+    os.environ['MASTER_ADDR'] = os.environ.get('HOSTNAME', 'localhost')
+    os.environ['MASTER_PORT'] = os.environ.get('MASTER_PORT', "29500")
+    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ['RANK'] = str(rank)
+    dist.init_process_group(backend='nccl', init_method='env://')
+    
+def shf_imagenet_train(args, config):
+    """Main DDP training function for SHF-ViT on a SLURM-based supercomputer."""
+    rank = int(os.environ['SLURM_PROCID'])
+    world_size = int(os.environ['SLURM_NTASKS'])
+    setup_ddp(rank, world_size)
+    
+    local_rank = int(os.environ['SLURM_LOCALID'])
+    device_id = local_rank % torch.cuda.device_count()
+    torch.cuda.set_device(device_id)
+    
+    if rank == 0: setup_logging(args)
+    logging.info(f"DDP Initialized for SHF-ViT. Rank {rank}/{world_size} on device {device_id}")
+
+    dataloaders = build_shf_imagenet_dataloader(
+        img_size=config['model']['img_size'],
+        data_dir=args.data_dir,
+        batch_size=config['training']['batch_size'],
+        num_workers=args.num_workers
+    )
+    
+    model = SHFVisionTransformer(
+        img_size=config['model']['img_size'],
+        patch_size=config['model']['patch_size'],
+        num_classes=config['model']['num_classes'],
+        embed_dim=config['model']['embed_dim'],
+        depth=config['model']['depth'],
+        num_heads=config['model']['num_heads']
+    ).to(device_id)
+        
+    model = DDP(model, device_ids=[device_id])
+
+    criterion = nn.CrossEntropyLoss()
+    
+    model_without_ddp = model.module
+    no_weight_decay_list = hasattr(model_without_ddp, 'no_weight_decay') and model_without_ddp.no_weight_decay() or set()
+    param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
+        no_weight_decay_list=no_weight_decay_list,
+        layer_decay=0.65
+    )
+    use_fused = config['training'].get('use_fused_optimizer', False)
+    optimizer = torch.optim.AdamW(
+        param_groups,
+        lr=config['training']['learning_rate'], 
+        betas=tuple(config['training'].get('betas', (0.9, 0.95))),
+        fused=use_fused
+    )
+
+    training_config = config['training']
+    num_epochs = training_config['num_epochs']
+    warmup_epochs = training_config.get('warmup_epochs', 0)
+    
+    steps_per_epoch = len(dataloaders['train'])
+    num_training_steps = num_epochs * steps_per_epoch
+    num_warmup_steps = warmup_epochs * steps_per_epoch
+    
+    if num_warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+    
+    start_epoch = 0
+    best_val_acc = 0.0
+    checkpoint_dir = os.path.join(args.output, args.savefile)
+    checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
+
+    if args.reload and os.path.exists(checkpoint_path):
+        if dist.get_rank() == 0:
+            logging.info(f"Resuming training from checkpoint: {checkpoint_path}")
+        
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_acc = checkpoint.get('best_val_acc', 0.0)
+        
+        if dist.get_rank() == 0:
+            logging.info(f"Successfully resumed. Starting from Epoch {start_epoch + 1}. Best Acc: {best_val_acc:.4f}")
+            
+    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
+    dist.destroy_process_group()
+    
 def shf_imagenet_train_single(args, config):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))

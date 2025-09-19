@@ -34,7 +34,7 @@ echo "Launching distributed training..."
 srun -N 4 -n 32 --ntasks-per-node 8 python ./main.py \
     --config ./configs/shf-vit-b_IN1K.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --savefile shf-b-n4-bz4k-he-timm-aa \
+    --savefile shf-vit-b-n4-bz4k \
     --num_workers 32 \
     --reload
 

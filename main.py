@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from train.gdt_vit import gdt_imagenet_train, gdt_imagenet_train_local
 # --- FIXED: Corrected import to match the function names in the provided script ---
 from train.vit_imagenet import vit_imagenet_train, vit_imagenet_train_single
+from train.shf_imagenet import shf_imagenet_train, shf_imagenet_train_single
 
 from train.mae_s8d import mae_pretrain_s8d
 
@@ -53,13 +54,20 @@ def main():
         else:
             print("--- Launching GDT-ViT in Local Mode. ---")
             gdt_imagenet_train_local(args, config)
-    elif task_name == 'vit_imagenet_ddp':
+    elif task_name == 'vit_imagenet':
         if is_ddp_environment:
             print("--- Launching ViT Baseline in DDP Mode. ---")
             vit_imagenet_train(args, config)
         else:
             print("--- Launching ViT Baseline in Local Mode. ---")
             vit_imagenet_train_single(args, config)
+    elif task_name == 'shf_imagenet':
+        if is_ddp_environment:
+            print("--- Launching ViT Baseline in DDP Mode. ---")
+            shf_imagenet_train(args, config)
+        else:
+            print("--- Launching ViT Baseline in Local Mode. ---")
+            shf_imagenet_train_single(args, config)
     elif task_name == 'mae_s8d_pretrain':
         if is_ddp_environment:
             print("--- Launching MAE-ViT in DDP Mode. ---")
