@@ -31,16 +31,16 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 4 -n 32 --ntasks-per-node 8 python ./main.py \
-    --config ./configs/vit-l_IN1K.yaml \
-    --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --savefile vit-l-n4-bz4k-he-timm-aa \
-    --num_workers 32 \
-    --reload
-
-# srun -N 2 -n 16 --ntasks-per-node 8 python ./main.py \
-#     --config ./configs/vit-b_IN1K.yaml \
+# srun -N 4 -n 32 --ntasks-per-node 8 python ./main.py \
+#     --config ./configs/vit-l_IN1K.yaml \
 #     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-#     --savefile vit-b-n2-bz4k-he-timm-aa \
+#     --savefile vit-l-n4-bz4k-he-timm-aa \
 #     --num_workers 32 \
 #     --reload
+
+srun -N 2 -n 16 --ntasks-per-node 8 python ./main.py \
+    --config ./configs/vit-b_IN1K.yaml \
+    --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
+    --savefile vit-b-n2-bz4k-he-timm-aa-nomix \
+    --num_workers 32 \
+    --reload
