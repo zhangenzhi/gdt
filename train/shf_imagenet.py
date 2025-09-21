@@ -296,7 +296,7 @@ def shf_imagenet_train_single(args, config):
         criterion = SoftTargetCrossEntropy()
     else:
         # Use standard LabelSmoothingCrossEntropy if Mixup is disabled
-        criterion = LabelSmoothingCrossEntropy(smoothing=config['mixup'].get('label_smoothing', 0.1))
+        criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
     
     # --- [NEW] Advanced Optimizer Setup ---
     model_without_ddp = model.module
