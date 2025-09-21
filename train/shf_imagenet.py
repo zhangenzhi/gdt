@@ -284,11 +284,11 @@ def shf_imagenet_train_single(args, config):
     mixup_fn = None
     if config['training'].get('use_mixup', False):
         mixup_fn = SHFMixup(
-            mixup_alpha=config['mixup']['mixup_alpha'],
-            cutmix_alpha=config['mixup']['cutmix_alpha'],
-            prob=config['mixup']['prob'],
-            switch_prob=config['mixup']['switch_prob'],
-            label_smoothing=config['mixup']['label_smoothing'],
+            mixup_alpha=0.8,
+            cutmix_alpha=1.0,
+            prob=1.0,
+            switch_prob=0.5,
+            label_smoothing=0.1,
             num_classes=config['model']['num_classes'],
             img_size=config['model']['img_size']
         )
