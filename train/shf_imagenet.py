@@ -22,6 +22,7 @@ from dataset.imagenet import build_shf_imagenet_dataloader
 from model.vit import SHFVisionTransformer
 # Utility for Layer-wise Rate Decay
 from dataset.utlis import param_groups_lrd
+from dataset.utlis import SHFMixup
 
 def setup_logging(args):
     """Configures logging to file and console."""
@@ -38,13 +39,14 @@ def setup_logging(args):
         ]
     )
 
-def train_shf_model(model, train_loader, val_loader, criterion, optimizer, scheduler, config, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False):
+def train_shf_model(model, train_loader, val_loader, criterion, mixup_fn, optimizer, scheduler, config, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False):
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
     is_main_process = not is_ddp or (dist.get_rank() == 0)
 
     if is_main_process:
         logging.info(f"Starting SHF-ViT training for {num_epochs} epochs...")
+        logging.info(f"Will start training from Epoch {start_epoch + 1}...")
         
     for epoch in range(start_epoch, num_epochs):
         if is_ddp: train_loader.sampler.set_epoch(epoch)
@@ -59,10 +61,19 @@ def train_shf_model(model, train_loader, val_loader, criterion, optimizer, sched
                     batch_dict[key] = value.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
             
+            # --- [KEY CHANGE] Apply Mixup/CutMix ---
+            # Store original labels for accuracy calculation
+            original_labels = labels.clone()
+            if mixup_fn is not None:
+                batch_dict, soft_labels = mixup_fn(batch_dict, labels)
+            else:
+                # If not using mixup, convert to one-hot for consistency with LabelSmoothingCrossEntropy
+                soft_labels = labels
+
             with autocast(device_type='cuda', dtype=torch.bfloat16):
-                # The model now takes the dictionary directly
                 outputs = model(batch_dict)
-                loss = criterion(outputs, labels)
+                # Use the (potentially soft) labels for loss calculation
+                loss = criterion(outputs, soft_labels)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -71,8 +82,9 @@ def train_shf_model(model, train_loader, val_loader, criterion, optimizer, sched
             if scheduler: scheduler.step()
                 
             _, predicted = torch.max(outputs.data, 1)
-            running_total += labels.size(0)
-            running_corrects += (predicted == labels).sum().item()
+            # Use original labels for calculating accuracy
+            running_total += original_labels.size(0)
+            running_corrects += (predicted == original_labels).sum().item()
             running_loss += loss.item()
 
             if (i + 1) % 50 == 0 and is_main_process:
@@ -88,14 +100,19 @@ def train_shf_model(model, train_loader, val_loader, criterion, optimizer, sched
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f}")
             
             checkpoint_dir = os.path.join(args.output, args.savefile)
+            checkpoint_data = {
+                'epoch': epoch, 'model_state_dict': model.module.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(), 'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_acc': best_val_acc,
+            }
             latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
-            torch.save({'epoch': epoch, 'model_state_dict': model.module.state_dict()}, latest_checkpoint_path)
+            torch.save(checkpoint_data, latest_checkpoint_path)
 
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 logging.info(f"New best validation accuracy: {best_val_acc:.4f}. Saving best model...")
                 best_checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
-                torch.save({'epoch': epoch, 'model_state_dict': model.module.state_dict()}, best_checkpoint_path)
+                torch.save(checkpoint_data, best_checkpoint_path)
 
     if is_main_process:
         logging.info(f'Finished Training. Best Validation Accuracy: {best_val_acc:.4f}')
@@ -164,7 +181,22 @@ def shf_imagenet_train(args, config):
         
     model = DDP(model, device_ids=[device_id])
 
-    criterion = nn.CrossEntropyLoss()
+    mixup_fn = None
+    if config['training'].get('use_mixup', False):
+        mixup_fn = SHFMixup(
+            mixup_alpha=config['mixup']['mixup_alpha'],
+            cutmix_alpha=config['mixup']['cutmix_alpha'],
+            prob=config['mixup']['prob'],
+            switch_prob=config['mixup']['switch_prob'],
+            label_smoothing=config['mixup']['label_smoothing'],
+            num_classes=config['model']['num_classes'],
+            img_size=config['model']['img_size']
+        )
+        # Use SoftTargetCrossEntropy for soft labels created by Mixup/CutMix
+        criterion = SoftTargetCrossEntropy()
+    else:
+        # Use standard LabelSmoothingCrossEntropy if Mixup is disabled
+        criterion = LabelSmoothingCrossEntropy(smoothing=config['mixup'].get('label_smoothing', 0.1))
     
     model_without_ddp = model.module
     no_weight_decay_list = hasattr(model_without_ddp, 'no_weight_decay') and model_without_ddp.no_weight_decay() or set()
@@ -216,7 +248,7 @@ def shf_imagenet_train(args, config):
         if dist.get_rank() == 0:
             logging.info(f"Successfully resumed. Starting from Epoch {start_epoch + 1}. Best Acc: {best_val_acc:.4f}")
             
-    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
+    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, mixup_fn=mixup_fn, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
     dist.destroy_process_group()
     
 def shf_imagenet_train_single(args, config):
@@ -248,7 +280,23 @@ def shf_imagenet_train_single(args, config):
         
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    criterion = nn.CrossEntropyLoss()
+    # --- [KEY CHANGE] Setup Mixup and Loss Function ---
+    mixup_fn = None
+    if config['training'].get('use_mixup', False):
+        mixup_fn = SHFMixup(
+            mixup_alpha=config['mixup']['mixup_alpha'],
+            cutmix_alpha=config['mixup']['cutmix_alpha'],
+            prob=config['mixup']['prob'],
+            switch_prob=config['mixup']['switch_prob'],
+            label_smoothing=config['mixup']['label_smoothing'],
+            num_classes=config['model']['num_classes'],
+            img_size=config['model']['img_size']
+        )
+        # Use SoftTargetCrossEntropy for soft labels created by Mixup/CutMix
+        criterion = SoftTargetCrossEntropy()
+    else:
+        # Use standard LabelSmoothingCrossEntropy if Mixup is disabled
+        criterion = LabelSmoothingCrossEntropy(smoothing=config['mixup'].get('label_smoothing', 0.1))
     
     # --- [NEW] Advanced Optimizer Setup ---
     model_without_ddp = model.module
@@ -304,7 +352,7 @@ def shf_imagenet_train_single(args, config):
         if dist.get_rank() == 0:
             logging.info(f"Successfully resumed. Starting from Epoch {start_epoch + 1}. Best Acc: {best_val_acc:.4f}")
             
-    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
+    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, mixup_fn=mixup_fn, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
     dist.destroy_process_group()
 
 
@@ -312,7 +360,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SHF-ViT Training Script")
     parser.add_argument('--config', type=str, default='./configs/shf-vit-b_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='shf-vit-b16', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='shf-vit-b16-mixup', help='Subdirectory for saving logs and models')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     # parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
