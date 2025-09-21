@@ -352,8 +352,7 @@ def shf_imagenet_train_single(args, config):
         if dist.get_rank() == 0:
             logging.info(f"Successfully resumed. Starting from Epoch {start_epoch + 1}. Best Acc: {best_val_acc:.4f}")
             
-    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, mixup_fn=mixup_fn, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
-    dist.destroy_process_group()
+    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True, mixup_fn=mixup_fn)
 
 
 if __name__ == "__main__":
