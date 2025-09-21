@@ -62,12 +62,8 @@ def main():
             print("--- Launching ViT Baseline in Local Mode. ---")
             vit_imagenet_train_single(args, config)
     elif task_name == 'shf_imagenet':
-        if is_ddp_environment:
-            print("--- Launching ViT Baseline in DDP Mode. ---")
-            shf_imagenet_train(args, config)
-        else:
-            print("--- Launching ViT Baseline in Local Mode. ---")
-            shf_imagenet_train_single(args, config)
+        print("--- Launching ViT Baseline in DDP Mode. ---")
+        shf_imagenet_train(args, config)
     elif task_name == 'mae_s8d_pretrain':
         if is_ddp_environment:
             print("--- Launching MAE-ViT in DDP Mode. ---")
