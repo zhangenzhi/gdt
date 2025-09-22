@@ -234,7 +234,95 @@ def evaluate_mae_model(model, val_loader, device, args, is_ddp=False, epoch=0):
         
     return total_loss / total_samples if total_samples > 0 else 0
 
+def setup_ddp(rank, world_size):
+    os.environ['MASTER_ADDR'] = os.environ.get('HOSTNAME', 'localhost')
+    os.environ['MASTER_PORT'] = os.environ.get('MASTER_PORT', "29500")
+    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ['RANK'] = str(rank)
+    dist.init_process_group(backend='nccl', init_method='env://')
 
+def mae_pretrain_s8d_ddp(args, config): # <--- MODIFIED: Renamed function
+    """Main DDP training function for the baseline ViT."""
+    rank = int(os.environ['SLURM_PROCID'])
+    world_size = int(os.environ['SLURM_NTASKS'])
+    setup_ddp(rank, world_size)
+    
+    local_rank = int(os.environ['SLURM_LOCALID'])
+    device_id = local_rank % torch.cuda.device_count()
+    torch.cuda.set_device(device_id)
+
+    if local_rank == 0:
+        setup_logging(args)
+        logging.info(f"Starting pre-training with {world_size} GPUs.")
+
+    args.img_size = config['model']['img_size']
+    args.batch_size = config['training']['batch_size']
+    args.patch_size = config['model']['patch_size']
+    
+    # <--- MODIFIED: Call our new dataloader builder
+    dataloaders = build_s8d_dataloaders(
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        resolution=args.img_size
+    )
+
+    # <--- MODIFIED: Explicitly pass in_chans to the model constructor
+    model = MAE(
+        img_size=args.img_size,
+        patch_size=args.patch_size,
+        in_chans=config['model']['in_channels'], # Ensure model uses 1 channel
+        encoder_dim=config['model']['encoder_embed_dim'],
+        encoder_depth=config['model']['encoder_depth'],
+        encoder_heads=config['model']['encoder_heads'],
+        decoder_dim=config['model']['decoder_embed_dim'],
+        decoder_depth=config['model']['decoder_depth'],
+        decoder_heads=config['model']['decoder_heads'],
+        mask_ratio=config['model']['mask_ratio']
+    ).to(device_id)
+
+    if config['training'].get('use_compile', False):
+        if dist.get_rank() == 0: logging.info("Applying torch.compile()...")
+        model = torch.compile(model)
+        
+    model = DDP(model, device_ids=[device_id])
+    
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config['training']['learning_rate'], 
+        betas=tuple(config['training'].get('betas', (0.9, 0.95)))
+    )
+    
+    training_config = config['training']
+    num_epochs = training_config['num_epochs']
+    warmup_epochs = training_config.get('warmup_epochs', 0)
+    steps_per_epoch = len(dataloaders['train'])
+    num_training_steps = num_epochs * steps_per_epoch
+    num_warmup_steps = warmup_epochs * steps_per_epoch
+    
+    if num_warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
+    
+    start_epoch = 0
+    if args.reload:
+        # Simplified reload logic, adjust if needed
+        checkpoint_path = os.path.join(args.output, args.savefile, "latest_checkpoint.pth")
+        if os.path.exists(checkpoint_path):
+            if dist.get_rank() == 0: logging.info(f"Resuming from checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            model.module.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            
+    pretrain_mae_model(model, dataloaders['train'], dataloaders['val'], optimizer, scheduler, num_epochs, device_id, args, config, start_epoch=start_epoch, is_ddp=(world_size > 1))
+    dist.destroy_process_group()
+    
+    
 def mae_pretrain_s8d(args, config): # <--- MODIFIED: Renamed function
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
