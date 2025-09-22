@@ -264,6 +264,8 @@ if __name__ == '__main__':
         num_pixels += images.size(0) * images.size(2) * images.size(3)
         channels_sum += torch.sum(images, dim=[0, 2, 3])
         channels_squared_sum += torch.sum(images**2, dim=[0, 2, 3])
+        
+        print(f"Mean:{channels_sum / num_pixels}, STD:{(channels_squared_sum / num_pixels - mean ** 2) ** 0.5}")
 
     mean = channels_sum / num_pixels
     std = (channels_squared_sum / num_pixels - mean ** 2) ** 0.5
