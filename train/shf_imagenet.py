@@ -182,13 +182,15 @@ def shf_imagenet_train(args, config):
     model = DDP(model, device_ids=[device_id])
 
     mixup_fn = None
+    # --- [KEY CHANGE] Setup Mixup and Loss Function ---
+    mixup_fn = None
     if config['training'].get('use_mixup', False):
         mixup_fn = SHFMixup(
-            mixup_alpha=config['mixup']['mixup_alpha'],
-            cutmix_alpha=config['mixup']['cutmix_alpha'],
-            prob=config['mixup']['prob'],
-            switch_prob=config['mixup']['switch_prob'],
-            label_smoothing=config['mixup']['label_smoothing'],
+            mixup_alpha=0.8,
+            cutmix_alpha=1.0,
+            prob=1.0,
+            switch_prob=0.5,
+            label_smoothing=0.1,
             num_classes=config['model']['num_classes'],
             img_size=config['model']['img_size']
         )
@@ -196,8 +198,8 @@ def shf_imagenet_train(args, config):
         criterion = SoftTargetCrossEntropy()
     else:
         # Use standard LabelSmoothingCrossEntropy if Mixup is disabled
-        criterion = LabelSmoothingCrossEntropy(smoothing=config['mixup'].get('label_smoothing', 0.1))
-    
+        criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
+        
     model_without_ddp = model.module
     no_weight_decay_list = hasattr(model_without_ddp, 'no_weight_decay') and model_without_ddp.no_weight_decay() or set()
     param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
@@ -248,7 +250,7 @@ def shf_imagenet_train(args, config):
         if dist.get_rank() == 0:
             logging.info(f"Successfully resumed. Starting from Epoch {start_epoch + 1}. Best Acc: {best_val_acc:.4f}")
             
-    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, mixup_fn=mixup_fn, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True)
+    train_shf_model(model, dataloaders['train'], dataloaders['val'], criterion, optimizer, scheduler, config, device_id, args, start_epoch=start_epoch, best_val_acc=best_val_acc, is_ddp=True, mixup_fn=mixup_fn)
     dist.destroy_process_group()
     
 def shf_imagenet_train_single(args, config):
