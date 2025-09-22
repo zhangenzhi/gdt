@@ -225,8 +225,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Calculate Mean and Std for S8D Dataset")
     # parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/s8d/pretrain", help='Path to the S8D dataset directory')
     parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1/No_001", help='Path to the S8D dataset directory')
-    parser.add_argument('--num_workers', type=int, default=16, help='Number of workers for DataLoader')
-    parser.add_argument('--batch_size', type=int, default=8, help='Batch size for calculation')
+    parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for calculation')
     parser.add_argument('--resolution', type=int, default=8192, help='Image resolution')
     args = parser.parse_args()
     
