@@ -204,7 +204,7 @@ def shf_imagenet_train(args, config):
     no_weight_decay_list = hasattr(model_without_ddp, 'no_weight_decay') and model_without_ddp.no_weight_decay() or set()
     param_groups = param_groups_lrd(model_without_ddp, config['training']['weight_decay'],
         no_weight_decay_list=no_weight_decay_list,
-        layer_decay=0.65
+        layer_decay=0.75
     )
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
