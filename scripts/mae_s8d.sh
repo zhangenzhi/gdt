@@ -35,5 +35,5 @@ srun -N 16 -n 128 --ntasks-per-node 8 python ./main.py \
     --config ./configs/mae-vit-b_S8D.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1/No_001 \
     --savefile mae-n16-bz256 \
-    --num_workers -1 \
+    --num_workers 32 \
     --reload
