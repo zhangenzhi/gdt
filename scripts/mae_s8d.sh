@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -A lrn075
-#SBATCH -o imagenet_vit-l16.o%J
+#SBATCH -o mae_s8d_vit-b.o%J
 #SBATCH -t 02:00:00
 #SBATCH -N 16
 #SBATCH -p batch
