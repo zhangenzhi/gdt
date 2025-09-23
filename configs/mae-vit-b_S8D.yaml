@@ -31,7 +31,7 @@ training:
   eta_min: 0.000001
   
   num_epochs: 400
-  batch_size: 16
+  batch_size: 2
 
   use_compile: false
   use_fused_optimizer: false
