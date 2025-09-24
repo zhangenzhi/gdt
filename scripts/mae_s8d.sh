@@ -34,6 +34,6 @@ echo "Launching distributed training..."
 srun -N 256 -n 2048 --ntasks-per-node 8 python ./main.py \
     --config ./configs/mae-vit-b_S8D.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1/No_001 \
-    --savefile mae-n64-bz1024-w0 \
+    --savefile mae-n64-bz2k-w0 \
     --num_workers 0 \
     --reload
