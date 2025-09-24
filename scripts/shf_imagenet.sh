@@ -2,7 +2,7 @@
 #SBATCH -A lrn075
 #SBATCH -o imagenet_shf-vit-b.o%J
 #SBATCH -t 02:00:00
-#SBATCH -N 4
+#SBATCH -N 2
 #SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
 #SBATCH --mail-type=END
@@ -31,10 +31,10 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 4 -n 32 --ntasks-per-node 8 python ./main.py \
+srun -N 2 -n 16 --ntasks-per-node 8 python ./main.py \
     --config ./configs/shf-vit-b_IN1K.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/dataset/imagenet \
-    --savefile shf-vit-b-n4-bz4k \
+    --savefile shf-vit-b-n4-bz4k-wk0 \
     --num_workers 0 \
     --reload
 
