@@ -2,7 +2,7 @@
 #SBATCH -A lrn075
 #SBATCH -o mae_s8d_vit-b.o%J
 #SBATCH -t 02:00:00
-#SBATCH -N 32
+#SBATCH -N 64
 #SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
 #SBATCH --mail-type=END
