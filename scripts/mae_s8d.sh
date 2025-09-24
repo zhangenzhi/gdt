@@ -31,9 +31,9 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 32 -n 256 --ntasks-per-node 8 python ./main.py \
+srun -N 64 -n 512 --ntasks-per-node 8 python ./main.py \
     --config ./configs/mae-vit-b_S8D.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1/No_001 \
-    --savefile mae-n16-bz256-w0 \
+    --savefile mae-n64-bz512-w0 \
     --num_workers 0 \
     --reload
