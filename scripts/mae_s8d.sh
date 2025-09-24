@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A lrn075
 #SBATCH -o mae_s8d_vit-b.o%J
-#SBATCH -t 02:00:00
-#SBATCH -N 128
+#SBATCH -t 10:00:00
+#SBATCH -N 256
 #SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
 #SBATCH --mail-type=END
@@ -31,7 +31,7 @@ echo "Modules loaded."
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
 echo "Launching distributed training..."
-srun -N 128 -n 1024 --ntasks-per-node 8 python ./main.py \
+srun -N 256 -n 2048 --ntasks-per-node 8 python ./main.py \
     --config ./configs/mae-vit-b_S8D.yaml \
     --data_dir /lustre/orion/nro108/world-shared/enzhi/spring8data/8192_output_1/No_001 \
     --savefile mae-n64-bz1024-w0 \
