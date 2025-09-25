@@ -3,6 +3,11 @@ import sys
 import yaml
 import argparse
 
+import torch.multiprocessing as mp
+mp.set_start_method("spawn", force=True)
+import cv2
+cv2.setNumThreads(0)
+
 # Ensure the project root is in the python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 

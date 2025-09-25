@@ -24,11 +24,6 @@ from model.vit import SHFVisionTransformer
 from dataset.utlis import param_groups_lrd
 from dataset.utlis import SHFMixup
 
-import torch.multiprocessing as mp
-mp.set_start_method("spawn", force=True)
-import cv2
-cv2.setNumThreads(0)
-
 def setup_logging(args):
     """Configures logging to file and console."""
     log_dir = os.path.join(args.output, args.savefile)
