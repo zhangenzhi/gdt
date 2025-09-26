@@ -30,6 +30,7 @@ echo "Modules loaded."
 # set by srun (like SLURM_PROCID) and initialize DDP.
 #
 # Note: Hyperparameters like epochs and batch size are now controlled by the config file.
+
 echo "Launching distributed training..."
 srun -N 2 -n 16 --ntasks-per-node 8 python ./main.py \
     --config ./configs/shf-vit-b_IN1K.yaml \
