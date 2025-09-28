@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -A lrn075
 #SBATCH -o mae_s8d_vit-b.o%J
-#SBATCH -t 10:00:00
+#SBATCH -t 6:00:00
 #SBATCH -N 128
 #SBATCH -p batch
 #SBATCH --mail-user=zhangsuiyu657@gmail.com
