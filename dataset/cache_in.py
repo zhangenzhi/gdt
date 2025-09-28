@@ -139,7 +139,7 @@ class NpMemmapDataset(Dataset):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='ImageNet Memmap Cache Test Script for Train and Val')
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/imagenet/', help='原始ImageNet数据集目录的路径 (包含 train/ 和 val/ 子目录)')
-    parser.add_argument('--cache_dir', type=str, default='/work/c30636/dataset/imagenet_cache/' help='用于存储生成的缓存文件 (.mmap, .npy, .json) 的目录')
+    parser.add_argument('--cache_dir', type=str, default='/work/c30636/dataset/imagenet_cache/', help='用于存储生成的缓存文件 (.mmap, .npy, .json) 的目录')
     parser.add_argument('--num_workers', type=int, default=32, help='用于构建缓存和加载数据的工作进程数')
     parser.add_argument('--batch_size', type=int, default=4096, help='DataLoader 测试的批次大小')
     parser.add_argument('--force_rebuild', action='store_true', help='即使缓存已存在，也强制重建')
