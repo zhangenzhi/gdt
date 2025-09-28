@@ -512,7 +512,7 @@ def imagenet_iter(args):
                 if step%1000==0:
                     print(step)
         print("Time cost for loading {}".format(time.time() - start_time))
-           
+          
 
 # if __name__ == "__main__":
 #     # 假设 args 已经通过某个函数（如 parse_args()）正确设置
