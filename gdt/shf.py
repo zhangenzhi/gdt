@@ -1,5 +1,8 @@
 import numpy as np
+
 import cv2 as cv2
+cv2.setNumThreads(0)
+
 import torch
 import random
 from matplotlib import pyplot as plt
