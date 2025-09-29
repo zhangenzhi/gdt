@@ -4,7 +4,8 @@ import yaml
 import argparse
 # Ensure the project root is in the python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+import torch
+    
 # Import training functions from both training scripts
 from train.gdt_vit import gdt_imagenet_train, gdt_imagenet_train_local
 # --- FIXED: Corrected import to match the function names in the provided script ---
@@ -74,4 +75,5 @@ def main():
         raise ValueError(f"Unknown task: {task_name}")
 
 if __name__ == '__main__':
+    torch.multiprocessing.set_start_method('spawn', force=True)
     main()
