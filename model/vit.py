@@ -215,8 +215,17 @@ class SHFVisionTransformer(VisionTransformer):
         patch_dim = in_channels * patch_size * patch_size
         self.patch_embed = nn.Linear(patch_dim, embed_dim)
         
-        # Override the pos_embed. Instead of a learnable parameter, we use our dynamic module.
-        self.pos_embed = SpatioStructuralPosEmbed(embed_dim, img_size)
+        # --- [CRITICAL FIX] ---
+        # The parent class expects `pos_embed` to be an nn.Parameter or None.
+        # We must not assign a module to it. Instead, we set it to None and
+        # create a new attribute for our dynamic positional embedding module.
+        self.pos_embed = None 
+        self.dynamic_pos_embed = SpatioStructuralPosEmbed(embed_dim, img_size)
+        
+        # We still need a learnable positional embedding for the CLS token.
+        # We create it as a separate parameter, matching the parent's convention.
+        self.cls_pos_embed = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # ----------------------
         
         # Re-apply weight initialization for the newly created layers
         self.apply(self._init_weights)
@@ -233,48 +242,25 @@ class SHFVisionTransformer(VisionTransformer):
     def _pos_embed(self, x: torch.Tensor, positions: torch.Tensor, sizes: torch.Tensor) -> torch.Tensor:
         """
         [OVERRIDDEN METHOD]
-        This method is an exact copy of the parent's _pos_embed, with one key change:
-        it uses our dynamic SpatioStructuralPosEmbed instead of a fixed parameter for patch tokens.
+        This method is now correctly implemented to handle the dynamic positional embedding
+        for patches and a separate learnable embedding for the CLS token.
         """
-        if self.pos_embed is None:
-            return x
+        # 1. Generate dynamic positional embedding for patch tokens and add it.
+        patch_pos_embed = self.dynamic_pos_embed(positions, sizes)
+        x = x + patch_pos_embed
 
-        # Concatenate class and register tokens if they exist
-        to_cat = []
-        if self.cls_token is not None:
-            to_cat.append(self.cls_token.expand(x.shape[0], -1, -1))
-        if self.reg_token is not None:
-            to_cat.append(self.reg_token.expand(x.shape[0], -1, -1))
-
-        if self.no_embed_class:
-            # deit-3, updated JAX (big vision)
-            # position embedding does not overlap with class token, add then concat
-            # --- [CUSTOM LOGIC] ---
-            x = x + self.pos_embed(positions, sizes)
-            # --------------------
-            if to_cat:
-                x = torch.cat(to_cat + [x], dim=1)
-        else:
-            # original timm, JAX, and deit vit impl
-            # pos_embed has entry for class token, concat then add
-            if to_cat:
-                x = torch.cat(to_cat + [x], dim=1)
-            # --- [CUSTOM LOGIC] ---
-            # Generate dynamic pos embed for patch tokens and prepend pos embed for cls/reg tokens
-            patch_pos_embed = self.pos_embed(positions, sizes)
-            # We assume the parent's original pos_embed stores the prefix token embeddings
-            prefix_pos_embed = super().pos_embed[:, :self.num_prefix_tokens, :]
-            full_pos_embed = torch.cat([prefix_pos_embed.expand(x.shape[0], -1, -1), patch_pos_embed], dim=1)
-            x = x + full_pos_embed
-            # --------------------
+        # 2. Prepend the class token, now with its own dedicated positional embedding.
+        # This follows the standard ViT practice (concat then apply dropout).
+        cls_token_with_pos = self.cls_token + self.cls_pos_embed
+        x = torch.cat([cls_token_with_pos.expand(x.shape[0], -1, -1), x], dim=1)
         
         return self.pos_drop(x)
 
     def forward_features(self, batch_dict: dict) -> torch.Tensor:
         """
         [OVERRIDDEN METHOD]
-        Custom feature extraction to handle dictionary input, but now aligning
-        perfectly with timm's internal step order.
+        Custom feature extraction to handle dictionary input, aligning
+        with timm's internal step order.
         """
         # 1. Unpack data and embed patches
         patches = batch_dict['patches']
