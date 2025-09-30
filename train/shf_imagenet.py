@@ -271,8 +271,7 @@ def shf_imagenet_train_single(args, config):
         img_size=config['model']['img_size'],
         data_dir=args.data_dir,
         batch_size=config['training']['batch_size'],
-        num_workers=args.num_workers,
-        prefetch_factor=1
+        num_workers=args.num_workers
     )
     
     model = SHFVisionTransformer(

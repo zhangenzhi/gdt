@@ -380,11 +380,11 @@ def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32
     dataloaders = {
         'train': DataLoader(
             image_datasets['train'], batch_size=batch_size, num_workers=num_workers,
-            pin_memory=True, sampler=samplers['train'], drop_last=True
+            pin_memory=True, sampler=samplers['train'], drop_last=True,prefetch_factor=1
         ),
         'val': DataLoader(
             image_datasets['val'], batch_size=batch_size, num_workers=num_workers,
-            pin_memory=True, sampler=samplers['val']
+            pin_memory=True, sampler=samplers['val'],prefetch_factor=1
         )
     }
     
