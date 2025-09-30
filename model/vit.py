@@ -152,10 +152,6 @@ class RelativeTransformerBlock(nn.Module):
 
 
 class SpatioStructuralPosEmbed(nn.Module):
-    """
-    Generates positional embeddings from patch center coordinates and sizes.
-    This is crucial for the model to understand the irregular patch layout.
-    """
     def __init__(self, embed_dim, img_size=224):
         super().__init__()
         self.img_size = float(img_size)
@@ -180,10 +176,6 @@ class SpatioStructuralPosEmbed(nn.Module):
         return pos_embed
 
 class SHFVisionTransformer(VisionTransformer):
-    """
-    A Vision Transformer adapted for the SHF dataloader by inheriting from timm's
-    VisionTransformer and overriding key methods for detailed alignment.
-    """
     def __init__(self,
                  img_size=224,
                  patch_size=16,
@@ -240,11 +232,6 @@ class SHFVisionTransformer(VisionTransformer):
             nn.init.constant_(m.weight, 1.0)
 
     def _pos_embed(self, x: torch.Tensor, positions: torch.Tensor, sizes: torch.Tensor) -> torch.Tensor:
-        """
-        [OVERRIDDEN METHOD]
-        This method is now correctly implemented to handle the dynamic positional embedding
-        for patches and a separate learnable embedding for the CLS token.
-        """
         # 1. Generate dynamic positional embedding for patch tokens and add it.
         patch_pos_embed = self.dynamic_pos_embed(positions, sizes)
         x = x + patch_pos_embed
@@ -257,11 +244,6 @@ class SHFVisionTransformer(VisionTransformer):
         return self.pos_drop(x)
 
     def forward_features(self, batch_dict: dict) -> torch.Tensor:
-        """
-        [OVERRIDDEN METHOD]
-        Custom feature extraction to handle dictionary input, aligning
-        with timm's internal step order.
-        """
         # 1. Unpack data and embed patches
         patches = batch_dict['patches']
         x = self.patch_embed(patches.flatten(2))
@@ -284,10 +266,6 @@ class SHFVisionTransformer(VisionTransformer):
         return x
 
     def forward(self, batch_dict: dict) -> torch.Tensor:
-        """
-        [OVERRIDDEN METHOD]
-        Main forward pass. Calls the custom forward_features and then the inherited head logic.
-        """
         # 1. Extract features using our custom logic that is now fully aligned with timm
         x = self.forward_features(batch_dict)
         
