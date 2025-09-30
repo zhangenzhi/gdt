@@ -176,7 +176,7 @@ def shf_imagenet_train(args, config):
         num_classes=config['model']['num_classes'],
         embed_dim=config['model']['embed_dim'],
         depth=config['model']['depth'],
-        num_heads=config['model']['num_heads']
+        num_heads=config['model']['num_heads'],
         drop_path_rate = config['model']['drop_path_rate']
     ).to(device_id)
         
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SHF-ViT Training Script")
     parser.add_argument('--config', type=str, default='./configs/shf-vit-b_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
-    parser.add_argument('--savefile', type=str, default='shf-vit-b16-mixup', help='Subdirectory for saving logs and models')
+    parser.add_argument('--savefile', type=str, default='shf-vit-b16-4k', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
