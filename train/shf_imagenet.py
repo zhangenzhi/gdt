@@ -61,8 +61,6 @@ def train_shf_model(model, train_loader, val_loader, criterion, optimizer, sched
                     batch_dict[key] = value.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
             
-            print(batch_dict["patches"].shape, labels.shape)
-            
             # --- [KEY CHANGE] Apply Mixup/CutMix ---
             # Store original labels for accuracy calculation
             original_labels = labels.clone()
