@@ -177,6 +177,7 @@ def shf_imagenet_train(args, config):
         embed_dim=config['model']['embed_dim'],
         depth=config['model']['depth'],
         num_heads=config['model']['num_heads']
+        drop_path_rate = config['model']['drop_path_rate']
     ).to(device_id)
         
     model = DDP(model, device_ids=[device_id])
