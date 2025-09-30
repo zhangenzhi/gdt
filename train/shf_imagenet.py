@@ -298,7 +298,8 @@ def shf_imagenet_train_single(args, config):
             img_size=config['model']['img_size']
         )
         # Use SoftTargetCrossEntropy for soft labels created by Mixup/CutMix
-        criterion = SoftTargetCrossEntropy()
+        # criterion = SoftTargetCrossEntropy()
+        criterion = nn.CrossEntropyLoss()
     else:
         # Use standard LabelSmoothingCrossEntropy if Mixup is disabled
         criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
