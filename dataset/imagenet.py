@@ -351,10 +351,7 @@ class SHFQuadtreeTransform:
         }
 
 # --- 主Dataloader构建函数 ---
-def build_shf_imagenet_dataloader(img_size, data_dir, batch_size, num_workers=32):
-    fixed_length = (img_size // 16) ** 2 # 假设patch大小为16
-    patch_size = 16
-
+def build_shf_imagenet_dataloader(img_size, patch_size, fixed_length, data_dir, batch_size, num_workers=32):
     train_transform_args = ImagenetTransformArgs(input_size=img_size)
     val_transform_args = ImagenetTransformArgs(input_size=img_size)
 

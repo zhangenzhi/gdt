@@ -267,6 +267,8 @@ def shf_imagenet_train_single(args, config):
 
     dataloaders = build_shf_imagenet_dataloader(
         img_size=config['model']['img_size'],
+        patch_size=config['model']['patch_size'],
+        fixed_length=config['model']['fixed_length'],
         data_dir=args.data_dir,
         batch_size=config['training']['batch_size'],
         num_workers=args.num_workers
