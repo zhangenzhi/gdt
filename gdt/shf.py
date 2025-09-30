@@ -398,7 +398,11 @@ class FixedQuadTree:
             
         final_patches = []
         for patch in seq_patch:
-            resized = cv2.resize(patch, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
+            if patch.shape[0] > 0 and patch.shape[1] > 0:
+                resized = cv2.resize(patch, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
+            else:
+                # 如果 patch 尺寸无效，创建一个黑色占位符，而不是让程序崩溃
+                resized = np.zeros((patch_size, patch_size, num_channels), dtype=img.dtype)
             final_patches.append(resized)
 
         num_generated = len(final_patches)
@@ -426,8 +430,8 @@ class ImagePatchify:
         elif img_np.ndim == 3 and img_np.shape[2] == 1:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2RGB)
 
-        # smooth_factor = random.choice(self.sths)
-        smooth_factor = 0
+        smooth_factor = random.choice(self.sths)
+        # smooth_factor = 0
         if smooth_factor == 0:
             edges = (np.random.uniform(low=0, high=255, size=img_np.shape[:2])).astype(np.uint8)
         else:
