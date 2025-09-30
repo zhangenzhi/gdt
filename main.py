@@ -75,5 +75,5 @@ def main():
         raise ValueError(f"Unknown task: {task_name}")
 
 if __name__ == '__main__':
-    # torch.multiprocessing.set_start_method('spawn', force=True)
+    torch.multiprocessing.set_start_method('spawn', force=True)
     main()

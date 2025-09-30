@@ -179,10 +179,10 @@ class SpatioStructuralPosEmbed(nn.Module):
         
         return pos_embed
 
-class SHFVisionTransformer(nn.Module):
+class SHFVisionTransformer(VisionTransformer):
     """
-    A Vision Transformer adapted for the SHF dataloader.
-    It takes a dictionary of serialized patches and their metadata as input.
+    A Vision Transformer adapted for the SHF dataloader by inheriting from timm's
+    VisionTransformer and overriding key methods for detailed alignment.
     """
     def __init__(self,
                  img_size=224,
@@ -194,25 +194,31 @@ class SHFVisionTransformer(nn.Module):
                  num_heads=12,
                  mlp_ratio=4.0,
                  **kwargs):
-        super().__init__()
         
-        # --- 1. Custom Embedding Layers ---
+        # --- 1. Call the Parent Constructor ---
+        # This initializes all the standard ViT components like blocks, norm, head, etc.
+        super().__init__(
+            img_size=img_size,
+            patch_size=patch_size,
+            in_chans=in_channels,
+            num_classes=num_classes,
+            embed_dim=embed_dim,
+            depth=depth,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            **kwargs
+        )
+        
+        # --- 2. Override Components for SHF Data Format ---
+        
+        # Override the patch_embed layer. Instead of a Conv2d, we need a Linear layer.
         patch_dim = in_channels * patch_size * patch_size
         self.patch_embed = nn.Linear(patch_dim, embed_dim)
+        
+        # Override the pos_embed. Instead of a learnable parameter, we use our dynamic module.
         self.pos_embed = SpatioStructuralPosEmbed(embed_dim, img_size)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-
-        # --- 2. Core Transformer Backbone (from timm) ---
-        timm_vit = VisionTransformer(
-            img_size=img_size, patch_size=patch_size, num_classes=num_classes,
-            embed_dim=embed_dim, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio,
-        )
-        self.blocks = timm_vit.blocks
-        self.norm = timm_vit.norm
         
-        # --- 3. Classification Head ---
-        self.head = timm_vit.head
-        
+        # Re-apply weight initialization for the newly created layers
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -224,34 +230,86 @@ class SHFVisionTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, batch_dict):
-        # 1. Unpack the dictionary from the dataloader
-        patches = batch_dict['patches'] # Shape: [B, N, C, P, P]
-        sizes = batch_dict['sizes']       # Shape: [B, N]
-        positions = batch_dict['positions'] # Shape: [B, N, 2]
-        
-        B, N, C, P, _ = patches.shape
-        
-        # 2. Flatten and embed patches
-        x = patches.flatten(2)         # Shape: [B, N, C*P*P]
-        x = self.patch_embed(x)        # Shape: [B, N, D_embed]
+    def _pos_embed(self, x: torch.Tensor, positions: torch.Tensor, sizes: torch.Tensor) -> torch.Tensor:
+        """
+        [OVERRIDDEN METHOD]
+        This method is an exact copy of the parent's _pos_embed, with one key change:
+        it uses our dynamic SpatioStructuralPosEmbed instead of a fixed parameter for patch tokens.
+        """
+        if self.pos_embed is None:
+            return x
 
-        # 3. Add the custom spatio-structural positional embedding
-        x = x + self.pos_embed(positions, sizes)
+        # Concatenate class and register tokens if they exist
+        to_cat = []
+        if self.cls_token is not None:
+            to_cat.append(self.cls_token.expand(x.shape[0], -1, -1))
+        if self.reg_token is not None:
+            to_cat.append(self.reg_token.expand(x.shape[0], -1, -1))
 
-        # 4. Prepend CLS token
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1) # Shape: [B, N+1, D_embed]
+        if self.no_embed_class:
+            # deit-3, updated JAX (big vision)
+            # position embedding does not overlap with class token, add then concat
+            # --- [CUSTOM LOGIC] ---
+            x = x + self.pos_embed(positions, sizes)
+            # --------------------
+            if to_cat:
+                x = torch.cat(to_cat + [x], dim=1)
+        else:
+            # original timm, JAX, and deit vit impl
+            # pos_embed has entry for class token, concat then add
+            if to_cat:
+                x = torch.cat(to_cat + [x], dim=1)
+            # --- [CUSTOM LOGIC] ---
+            # Generate dynamic pos embed for patch tokens and prepend pos embed for cls/reg tokens
+            patch_pos_embed = self.pos_embed(positions, sizes)
+            # We assume the parent's original pos_embed stores the prefix token embeddings
+            prefix_pos_embed = super().pos_embed[:, :self.num_prefix_tokens, :]
+            full_pos_embed = torch.cat([prefix_pos_embed.expand(x.shape[0], -1, -1), patch_pos_embed], dim=1)
+            x = x + full_pos_embed
+            # --------------------
         
-        # 5. Pass through Transformer blocks
+        return self.pos_drop(x)
+
+    def forward_features(self, batch_dict: dict) -> torch.Tensor:
+        """
+        [OVERRIDDEN METHOD]
+        Custom feature extraction to handle dictionary input, but now aligning
+        perfectly with timm's internal step order.
+        """
+        # 1. Unpack data and embed patches
+        patches = batch_dict['patches']
+        x = self.patch_embed(patches.flatten(2))
+
+        # 2. Add positional embedding (this now includes cls_token logic and dropout)
+        x = self._pos_embed(x, batch_dict['positions'], batch_dict['sizes'])
+
+        # 3. Apply patch dropout (inherited from parent)
+        x = self.patch_drop(x)
+        
+        # 4. Apply pre-normalization (inherited from parent)
+        x = self.norm_pre(x)
+        
+        # 5. Pass through Transformer blocks (inherited from parent)
         x = self.blocks(x)
+        
+        # 6. Apply final normalization (inherited from parent)
         x = self.norm(x)
         
-        # 6. Pass CLS token to classification head
-        cls_output = x[:, 0]
-        logits = self.head(cls_output)
+        return x
+
+    def forward(self, batch_dict: dict) -> torch.Tensor:
+        """
+        [OVERRIDDEN METHOD]
+        Main forward pass. Calls the custom forward_features and then the inherited head logic.
+        """
+        # 1. Extract features using our custom logic that is now fully aligned with timm
+        x = self.forward_features(batch_dict)
         
-        return logits
+        # 2. Call the parent's head-forwarding logic
+        # This correctly handles different global_pool settings ('token', 'avg', etc.)
+        x = self.forward_head(x)
+        
+        return x
     
 class MAEVisionTransformer(timm.models.vision_transformer.VisionTransformer):
     """ Vision Transformer with support for global average pooling
