@@ -287,7 +287,8 @@ class Rect:
         return int(np.sum(patch)/255)
     
     def get_area(self, img):
-        return img[self.y1:self.y2, self.x1:self.x2, :].copy()
+        # return img[self.y1:self.y2, self.x1:self.x2, :].copy()
+        return img[self.y1:self.y2, self.x1:self.x2, :]
     
     def get_coord(self):
         return self.x1, self.x2, self.y1, self.y2
