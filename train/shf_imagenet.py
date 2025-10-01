@@ -42,7 +42,8 @@ def setup_logging(args):
 def train_shf_model(model, train_loader, val_loader, criterion, optimizer, scheduler, config, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False, mixup_fn=None):
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
-    is_main_process = not is_ddp or (dist.get_rank() == 0)
+    
+    is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
     if is_main_process:
         logging.info(f"Starting SHF-ViT training for {num_epochs} epochs...")
