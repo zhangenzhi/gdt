@@ -39,36 +39,6 @@ class Rect:
                                  linewidth=lw, edgecolor=c, facecolor='none')
         ax.add_patch(rect)
 
-class Rect:
-    def __init__(self, x1, x2, y1, y2) -> None:
-        self.x1 = int(x1); self.x2 = int(x2); self.y1 = int(y1); self.y2 = int(y2)
-        assert self.x1 <= self.x2, 'x1 > x2, wrong coordinate.'
-        assert self.y1 <= self.y2, 'y1 > y2, wrong coordinate.'
-    
-    def contains(self, domain):
-        if self.y1 >= self.y2 or self.x1 >= self.x2: return 0
-        patch = domain[self.y1:self.y2, self.x1:self.x2]
-        return int(np.sum(patch)/255)
-    
-    def get_area(self, img):
-        return img[self.y1:self.y2, self.x1:self.x2, :]
-    
-    def get_coord(self):
-        return self.x1, self.x2, self.y1, self.y2
-    
-    def get_size(self):
-        return self.x2 - self.x1, self.y2 - self.y1
-    
-    def get_center(self):
-        return (self.x2 + self.x1) / 2, (self.y2 + self.y1) / 2
-    
-    def draw(self, ax, c='cyan', lw=1, **kwargs):
-        rect = patches.Rectangle((self.x1, self.y1), 
-                                 width=self.x2-self.x1, 
-                                 height=self.y2-self.y1, 
-                                 linewidth=lw, edgecolor=c, facecolor='none')
-        ax.add_patch(rect)
-
 class FixedQuadTree:
     def __init__(self, domain, fixed_length=128) -> None:
         self.domain = domain
