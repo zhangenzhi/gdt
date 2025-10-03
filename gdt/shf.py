@@ -120,11 +120,11 @@ class FixedQuadTree:
         return final_patches, seq_size, seq_pos
 
 class ImagePatchify:
-    def __init__(self, fixed_length=196, patch_size=16, num_channels=3, istrain=True) -> None:
+    def __init__(self, fixed_length=196, patch_size=16, num_channels=3, is_train=True) -> None:
         self.fixed_length = fixed_length
         self.patch_size = patch_size
         self.num_channels = num_channels
-        self.istrain = istrain
+        self.is_train = is_train
         self.sths = [0, 1, 3, 5]
         self.cannys = list(range(50, 151, 10))
         
@@ -136,7 +136,7 @@ class ImagePatchify:
 
         smooth_factor = random.choice(self.sths)
         # smooth_factor = 0
-        if smooth_factor == 0 or self.istrain==False:
+        if smooth_factor == 0 or self.is_train==False:
             edges = (np.random.uniform(low=0, high=255, size=img_np.shape[:2])).astype(np.uint8)
         else:
             # Convert RGB to Grayscale for Canny edge detection
