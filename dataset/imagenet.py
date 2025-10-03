@@ -286,7 +286,7 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 class SHFQuadtreeTransform:
     def __init__(self, is_train, transform_args, fixed_length=196, patch_size=16):
         self.base_transform = self._build_pil_transform(is_train, transform_args)
-        self.patchify = ImagePatchify(fixed_length=fixed_length, patch_size=patch_size, num_channels=3)
+        self.patchify = ImagePatchify(fixed_length=fixed_length, patch_size=patch_size, num_channels=3, is_train=is_train)
 
     def _build_pil_transform(self, is_train, args):
         if is_train:
