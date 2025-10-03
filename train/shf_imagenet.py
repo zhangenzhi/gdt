@@ -369,8 +369,8 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/shf-vit-b_IN1K.yaml', help='Path to the YAML configuration file.')
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='shf-vit-b16-4k-pz16', help='Subdirectory for saving logs and models')
-    parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet/", help='Path to the ImageNet dataset directory')
-    # parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
+    # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/dataset/imagenet/", help='Path to the ImageNet dataset directory')
+    parser.add_argument('--data_dir', type=str, default="/work/c30778/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     
