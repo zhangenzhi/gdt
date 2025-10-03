@@ -5,7 +5,7 @@ from functools import partial
 from torch.utils.checkpoint import checkpoint
 
 import timm
-from timm.models.layers import DropPath
+from timm.layers import DropPath
 import timm.models.vision_transformer
 from timm.models.vision_transformer import VisionTransformer 
 
