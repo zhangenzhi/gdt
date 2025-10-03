@@ -327,12 +327,12 @@ class SHFQuadtreeTransform:
         sizes_tensor = torch.tensor(seq_sizes, dtype=torch.long)
         positions_tensor = torch.tensor(seq_pos, dtype=torch.float32)
         
-        # Get coordinates for visualization
-        coords = [node[0].get_coord() for node in qdt.nodes]
-        if len(coords) < self.patchify.fixed_length:
-            padding_needed = self.patchify.fixed_length - len(coords)
-            coords.extend([(0,0,0,0)] * padding_needed)
-        coords_tensor = torch.tensor(coords, dtype=torch.long)
+        # # Get coordinates for visualization
+        # coords = [node[0].get_coord() for node in qdt.nodes]
+        # if len(coords) < self.patchify.fixed_length:
+        #     padding_needed = self.patchify.fixed_length - len(coords)
+        #     coords.extend([(0,0,0,0)] * padding_needed)
+        # coords_tensor = torch.tensor(coords, dtype=torch.long)
 
         # Get the original image tensor for visualization
         original_tensor = transforms.ToTensor()(augmented_pil)
@@ -346,7 +346,7 @@ class SHFQuadtreeTransform:
             "patches": patches_tensor_normalized,
             "sizes": sizes_tensor,
             "positions": positions_tensor,
-            "coords": coords_tensor, # Added
+            # "coords": coords_tensor, # Added
             "original_image": original_tensor_normalized # Added
         }
 

@@ -88,7 +88,6 @@ class FixedQuadTree:
             
             # Replace the parent node with its four children in the list
             self.nodes = self.nodes[:idx] + new_nodes + self.nodes[idx+1:]
-            # -----------------------------------------------------------------
 
     def serialize(self, img, patch_size, num_channels):
         seq_patch = []
