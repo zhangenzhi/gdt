@@ -339,7 +339,7 @@ def create_timm_vit(config):
         pretrained=model_config['pretrained'],
         num_classes=model_config['num_classes'],
         img_size=model_config['img_size'],
-        patch_size=model_config['patch_size']//2,
+        patch_size=model_config['patch_size'],
         in_chans=model_config.get('in_channels', 3),
         embed_dim=model_config['embed_dim'],
         depth=model_config['depth'],
