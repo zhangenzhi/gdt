@@ -20,8 +20,8 @@ from torch.amp import GradScaler, autocast
 sys.path.append("./")
 from dataset.imagenet import imagenet_distribute, imagenet_subloaders
 # from model.vit import create_vit_model
-# from model.vit import create_timm_vit as create_vit_model
-from model.vit import create_vit_model
+from model.vit import create_timm_vit as create_vit_model
+# from model.vit import create_vit_model
 
 from dataset.utlis import param_groups_lrd
 
@@ -333,12 +333,16 @@ def vit_imagenet_train_single(args, config):
      # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
     training_config = config['training']
     num_epochs = training_config['num_epochs']
-    warmup_epochs = training_config.get('warmup_epochs', 0)
-    
-    # 计算总的训练步数和预热步数
-    steps_per_epoch = len(dataloaders['train'])
-    num_training_steps = num_epochs * steps_per_epoch
-    num_warmup_steps = warmup_epochs * steps_per_epoch
+    warmup_epochs = training_config.get('warmup_epochs', 0) # 这里会得到 20
+
+    # 从配置中获取梯度累积步数
+    accumulation_steps = training_config.get('gradient_accumulation_steps', 1) # 这里会得到 4
+    optimizer_steps_per_epoch = len(dataloaders['train']) // accumulation_steps
+
+    # 基于“优化器更新次数”来计算总步数和预热步数
+    num_training_steps = num_epochs * optimizer_steps_per_epoch
+    num_warmup_steps = warmup_epochs * optimizer_steps_per_epoch # 这里会是 20 * (len(loader)/4)
+
     
     if num_warmup_steps > 0:
         # 预热调度器：从一个很小的值线性增长到1

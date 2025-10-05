@@ -319,7 +319,7 @@ def create_vit_model(config: Dict) -> VisionTransformer:
     model = VisionTransformer(
         img_size=model_config['img_size'],
         patch_size=model_config['patch_size'],
-        in_channels=model_config.get('in_channels', 3),
+        in_chans=model_config.get('in_channels', 3),
         embed_dim=model_config['embed_dim'],
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
