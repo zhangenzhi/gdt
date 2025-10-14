@@ -435,8 +435,8 @@ class VisionTransformerWithRoPE(VisionTransformer):
             Block(
                 dim=embed_dim,
                 num_heads=num_heads,
-                mlp_ratio=self.mlp_ratio,
-                qkv_bias=self.qkv_bias,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
                 attn_class=partial(RopeAttention, rope=self.rope),
                 norm_layer=self.norm_layer,
                 act_layer=self.act_layer,
