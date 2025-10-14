@@ -24,9 +24,6 @@ sys.path.append("./")
 from model.timm_sam import SAMLikeModel
 from dataset.s8d import build_s8d_segmentation_dataloaders
 
-# --------------------------------------------- #
-#   1. 日志与 DDP 设置 (保持不变)
-# --------------------------------------------- #
 def setup_logging(args):
     """配置日志记录到文件和控制台。"""
     log_dir = os.path.join(args.output, args.savefile)
@@ -171,9 +168,6 @@ def evaluate_segmentation_model(model, val_loader, device, num_classes, is_ddp=F
         
     return total_dice / num_samples if num_samples > 0 else 0
 
-# --------------------------------------------- #
-#   5. 主函数 (保持不变)
-# --------------------------------------------- #
 def segmentation_s8d_finetune_ddp(args, config, mae_config):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))

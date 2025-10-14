@@ -355,3 +355,116 @@ def create_timm_vit(config):
     
     return model
 
+import torch
+import torch.nn as nn
+import timm
+from timm.layers import RotaryEmbedding
+from timm.models.vision_transformer import VisionTransformer, Block, Attention
+from typing import Dict
+
+# 确保已安装 timm
+# pip install timm
+
+# --- 步骤 1: 创建注入了 RoPE 的 Attention 模块 ---
+# 我们继承 timm 的 Attention 类，只修改 forward 方法来应用 RoPE
+class RopeAttention(Attention):
+    """
+    Attention module with Rotary Positional Embedding.
+    """
+    def __init__(self, dim, num_heads=8, qkv_bias=False, rope=None, **kwargs):
+        super().__init__(dim, num_heads=num_heads, qkv_bias=qkv_bias, **kwargs)
+        # 接收一个外部传入的 RoPE 实例
+        self.rope = rope
+
+    def forward(self, x):
+        B, N, C = x.shape
+        # self.qkv, self.scale, self.proj 都继承自父类 timm.models.vision_transformer.Attention
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.unbind(0)
+
+        # --- RoPE 注入点 ---
+        # 只有在传入了 rope 实例时才应用
+        if self.rope is not None:
+            q = self.rope(q)
+            k = self.rope(k)
+        # --- 注入结束 ---
+
+        x = self.forward_attention(q, k, v)
+        x = self.proj(x)
+        
+        return x
+
+# --- 步骤 2: 创建使用 RopeAttention 的 VisionTransformer ---
+# 我们继承 timm 的 VisionTransformer 类
+class VisionTransformerWithRoPE(VisionTransformer):
+    """
+    Vision Transformer that uses Rotary Positional Embedding.
+    - Disables class token and absolute positional embedding.
+    - Uses a custom Attention block (RopeAttention).
+    - Uses global average pooling for classification.
+    """
+    def __init__(self, **kwargs):
+        # --- 关键修改 1: 在 super().__init__ 中禁用 pos_embed 和 class_token ---
+        # global_pool='mean' 会自动处理池化，替代 cls_token
+        # pos_embed=False 和 class_token=False 会阻止这些模块的创建
+        super().__init__(class_token=False, pos_embed=False, global_pool='mean', **kwargs)
+
+        # --- 关键修改 2: 实例化 RoPE 模块 ---
+        # RoPE 应用于每个注意力头的维度 (head_dim)
+        head_dim = self.embed_dim // self.num_heads
+        self.rope = RotaryEmbedding(dim=head_dim)
+
+        # --- 关键修改 3: 重新创建 blocks，并传入自定义的 Attention 类 ---
+        # timm 的 Block 类非常灵活，允许我们通过 attn_class 参数指定要使用的 Attention 实现
+        # 我们使用 functools.partial 来预设 RopeAttention 的 rope 参数
+        from functools import partial
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=self.embed_dim,
+                num_heads=self.num_heads,
+                mlp_ratio=self.mlp_ratio,
+                qkv_bias=self.qkv_bias,
+                # 传入我们自定义的 RopeAttention 类
+                attn_class=partial(RopeAttention, rope=self.rope),
+                norm_layer=self.norm_layer,
+                act_layer=self.act_layer,
+                drop=self.drop_rate,
+                drop_path=self.dpr[i].item() if hasattr(self, 'dpr') else 0.,
+            )
+            for i in range(self.depth)])
+        
+        # forward_features 和 forward 方法直接继承父类即可，
+        # 因为我们通过 global_pool='mean' 已经处理了分类头的逻辑。
+        # 父类的 forward_features 不再包含 cls_token 和 pos_embed 的相关操作。
+
+# --- 步骤 3: 创建一个工厂函数来方便地构建模型 ---
+def create_rope_vit_model(model_name='vit_base_patch16_224', **kwargs) -> VisionTransformerWithRoPE:
+    """
+    Factory function to create a Vision Transformer with RoPE.
+    
+    Args:
+        model_name (str): The name of a standard timm ViT model to get default configs from.
+        **kwargs: Additional arguments to override the default config.
+    
+    Returns:
+        An instance of VisionTransformerWithRoPE.
+    """
+    # 从 timm 获取标准模型的配置
+    model_cfg = timm.models.get_model_config(model_name)
+    model_args = dict(
+        patch_size=model_cfg['patch_size'],
+        embed_dim=model_cfg['embed_dim'],
+        depth=model_cfg['depth'],
+        num_heads=model_cfg['num_heads'],
+        mlp_ratio=model_cfg['mlp_ratio'],
+        qkv_bias=True,  # 通常 ViT 中为 True
+        img_size=model_cfg['input_size'][-1]
+    )
+    
+    # 用用户传入的参数覆盖默认配置
+    model_args.update(kwargs)
+
+    # 实例化我们的 RoPE ViT 模型
+    model = VisionTransformerWithRoPE(**model_args)
+    
+    return model
