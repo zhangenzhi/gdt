@@ -394,48 +394,34 @@ class RopeAttention(Attention):
         
         return x
 
-# --- 步骤 2: 创建使用 RopeAttention 的 VisionTransformer ---
-# 我们继承 timm 的 VisionTransformer 类
 class VisionTransformerWithRoPE(VisionTransformer):
-    """
-    Vision Transformer that uses Rotary Positional Embedding.
-    - Disables class token and absolute positional embedding.
-    - Uses a custom Attention block (RopeAttention).
-    - Uses global average pooling for classification.
-    """
     def __init__(self, **kwargs):
-        # --- 关键修改 1: 在 super().__init__ 中禁用 pos_embed 和 class_token ---
-        # global_pool='mean' 会自动处理池化，替代 cls_token
-        # pos_embed=False 和 class_token=False 会阻止这些模块的创建
+        # 1. 从 kwargs 中提前获取我们需要的参数
+        # 这样做更安全，不依赖于父类__init__的实现细节
+        embed_dim = kwargs['embed_dim']
+        num_heads = kwargs['num_heads']
+
+        # 2. 调用父类的构造函数
         super().__init__(class_token=False, pos_embed='none', global_pool='avg', **kwargs)
 
-        # --- 关键修改 2: 实例化 RoPE 模块 ---
-        # RoPE 应用于每个注意力头的维度 (head_dim)
-        head_dim = self.embed_dim // self.num_heads
+        # 3. 现在使用我们之前获取的、保证存在的局部变量
+        head_dim = embed_dim // num_heads
         self.rope = RotaryEmbedding(dim=head_dim)
 
-        # --- 关键修改 3: 重新创建 blocks，并传入自定义的 Attention 类 ---
-        # timm 的 Block 类非常灵活，允许我们通过 attn_class 参数指定要使用的 Attention 实现
-        # 我们使用 functools.partial 来预设 RopeAttention 的 rope 参数
-        from functools import partial
+        # 4. 重建 blocks 时，同样使用这些可靠的局部变量
         self.blocks = nn.ModuleList([
             Block(
-                dim=self.embed_dim,
-                num_heads=self.num_heads,
+                dim=embed_dim,  # 使用局部变量 embed_dim
+                num_heads=num_heads,  # 使用局部变量 num_heads
                 mlp_ratio=self.mlp_ratio,
                 qkv_bias=self.qkv_bias,
-                # 传入我们自定义的 RopeAttention 类
                 attn_class=partial(RopeAttention, rope=self.rope),
                 norm_layer=self.norm_layer,
                 act_layer=self.act_layer,
                 drop=self.drop_rate,
-                drop_path=self.dpr[i].item() if hasattr(self, 'dpr') else 0.,
+                drop_path=self.dpr[i].item() if hasattr(self, 'dpr') and self.dpr is not None else 0.,
             )
             for i in range(self.depth)])
-        
-        # forward_features 和 forward 方法直接继承父类即可，
-        # 因为我们通过 global_pool='mean' 已经处理了分类头的逻辑。
-        # 父类的 forward_features 不再包含 cls_token 和 pos_embed 的相关操作。
 
 def create_rope_vit_model(config: Dict) -> VisionTransformerWithRoPE:
     """
