@@ -370,18 +370,35 @@ class RopeAttention(Attention):
         self.rope = rope
 
     def forward(self, x):
+        # x: (B, N, C)
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)
+        q, k, v = qkv.unbind(0)   # each: (B, num_heads, N, head_dim)
 
+        # --- RoPE 注入点：先把 batch 和 head 合并，再调用 rope，最后恢复形状 ---
         if self.rope is not None:
+            # 合并 B 和 num_heads
+            bh = B * self.num_heads
+            # q/k: (B, H, N, D) -> (B*H, N, D)
+            q = q.reshape(bh, N, self.head_dim)
+            k = k.reshape(bh, N, self.head_dim)
+
+            # apply rope (expect shape (batch_like, seq_len, dim))
             q = self.rope(q)
             k = self.rope(k)
 
+            # 恢复到 (B, H, N, D)
+            q = q.view(B, self.num_heads, N, self.head_dim)
+            k = k.view(B, self.num_heads, N, self.head_dim)
+        # --- 注入结束 ---
+
+        # 继续 attention 计算（与 timm Attention._forward 相同逻辑）
+        # attn: (B, H, N, N)
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
+        # v: (B, H, N, D) -> 输出: (B, N, C)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
