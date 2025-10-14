@@ -407,7 +407,7 @@ class VisionTransformerWithRoPE(VisionTransformer):
         # --- 关键修改 1: 在 super().__init__ 中禁用 pos_embed 和 class_token ---
         # global_pool='mean' 会自动处理池化，替代 cls_token
         # pos_embed=False 和 class_token=False 会阻止这些模块的创建
-        super().__init__(class_token=False, pos_embed=False, global_pool='mean', **kwargs)
+        super().__init__(class_token=False, pos_embed=False, global_pool='avg', **kwargs)
 
         # --- 关键修改 2: 实例化 RoPE 模块 ---
         # RoPE 应用于每个注意力头的维度 (head_dim)
