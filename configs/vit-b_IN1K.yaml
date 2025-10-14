@@ -30,7 +30,7 @@ training:
   num_epochs: 300
   batch_size: 256 # batch per node
 
-  use_compile: true                # 推荐：开启模型编译
+  use_compile: False                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
   use_mixup: true
   use_fp8: False
