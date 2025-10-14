@@ -443,7 +443,7 @@ class VisionTransformerWithRoPE(VisionTransformer):
                 drop=self.drop_rate,
                 drop_path=self.dpr[i].item() if hasattr(self, 'dpr') and self.dpr is not None else 0.,
             )
-            for i in range(self.depth)])
+            for i in range(depth)])
 
 def create_rope_vit_model(config: Dict) -> VisionTransformerWithRoPE:
     """
