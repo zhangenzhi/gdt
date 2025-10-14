@@ -6,6 +6,7 @@ model:
   img_size: 8192
   patch_size: 128
   in_channels: 1
+  fixed_length: 4096
 
   # Encoder Configuration (from ViT model)
   encoder_embed_dim: 768
