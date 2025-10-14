@@ -395,24 +395,46 @@ class RopeAttention(Attention):
         return x
 
 class VisionTransformerWithRoPE(VisionTransformer):
-    def __init__(self, **kwargs):
-        # 1. 从 kwargs 中提前获取我们需要的参数
-        # 这样做更安全，不依赖于父类__init__的实现细节
-        embed_dim = kwargs['embed_dim']
-        num_heads = kwargs['num_heads']
+    def __init__(self,
+                 img_size=224,
+                 patch_size=16,
+                 in_chans=3,  # 使用timm的命名习惯 'in_chans'
+                 num_classes=1000,
+                 embed_dim=768,
+                 depth=12,
+                 num_heads=12,
+                 mlp_ratio=4.0,
+                 qkv_bias=True, # 明确添加 qkv_bias
+                 **kwargs):
 
-        # 2. 调用父类的构造函数
-        super().__init__(class_token=False, pos_embed='none', global_pool='avg', **kwargs)
+        # --- 关键步骤 ---
+        # 调用父类构造函数，并强制设置我们需要的架构选项
+        super().__init__(
+            img_size=img_size,
+            patch_size=patch_size,
+            in_chans=in_chans,
+            num_classes=num_classes,
+            embed_dim=embed_dim,
+            depth=depth,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            qkv_bias=qkv_bias,
+            class_token=False,  # 必须禁用 class token
+            pos_embed='none',   # 必须禁用 position embedding
+            global_pool='avg',  # 必须设置为 avg pooling
+            **kwargs            # 传递任何其他可能的参数
+        )
 
-        # 3. 现在使用我们之前获取的、保证存在的局部变量
+        # 实例化 RoPE 模块
         head_dim = embed_dim // num_heads
         self.rope = RotaryEmbedding(dim=head_dim)
 
-        # 4. 重建 blocks 时，同样使用这些可靠的局部变量
+        # 重建 blocks，注入我们自定义的 RopeAttention
+        # 注意: self.mlp_ratio, self.qkv_bias 等属性已由 super().__init__ 设置好
         self.blocks = nn.ModuleList([
             Block(
-                dim=embed_dim,  # 使用局部变量 embed_dim
-                num_heads=num_heads,  # 使用局部变量 num_heads
+                dim=embed_dim,
+                num_heads=num_heads,
                 mlp_ratio=self.mlp_ratio,
                 qkv_bias=self.qkv_bias,
                 attn_class=partial(RopeAttention, rope=self.rope),
