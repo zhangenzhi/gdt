@@ -357,58 +357,72 @@ def create_timm_vit(config):
 
 import torch
 import torch.nn as nn
-import timm
-from timm.layers import RotaryEmbedding
-from timm.models.vision_transformer import VisionTransformer, Block, Attention
+from timm.layers import RotaryEmbedding, DropPath, Mlp
+from timm.models.vision_transformer import VisionTransformer, Attention
+from functools import partial
 from typing import Dict
 
-# 确保已安装 timm
-# pip install timm
 
-# --- 步骤 1: 创建注入了 RoPE 的 Attention 模块 ---
-# 我们继承 timm 的 Attention 类，只修改 forward 方法来应用 RoPE
+# --- 自定义 Attention with RoPE ---
 class RopeAttention(Attention):
-    """
-    Attention module with Rotary Positional Embedding.
-    """
     def __init__(self, dim, num_heads=8, qkv_bias=False, rope=None, **kwargs):
         super().__init__(dim, num_heads=num_heads, qkv_bias=qkv_bias, **kwargs)
-        # 接收一个外部传入的 RoPE 实例
         self.rope = rope
 
     def forward(self, x):
         B, N, C = x.shape
-        # self.qkv, self.scale, self.proj 都继承自父类 timm.models.vision_transformer.Attention
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
 
-        # --- RoPE 注入点 ---
-        # 只有在传入了 rope 实例时才应用
         if self.rope is not None:
             q = self.rope(q)
             k = self.rope(k)
-        # --- 注入结束 ---
 
-        x = self.forward_attention(q, k, v)
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
-        
+        x = self.proj_drop(x)
         return x
 
+
+# --- 自定义 Block（替换 Attention）---
+class RopeBlock(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0, qkv_bias=True,
+                 drop=0., attn_drop=0., drop_path=0., act_layer=nn.GELU,
+                 norm_layer=nn.LayerNorm, rope=None):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = RopeAttention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, rope=rope,
+            attn_drop=attn_drop, proj_drop=drop)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
+                       act_layer=act_layer, drop=drop)
+
+    def forward(self, x):
+        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+# --- 主体 VisionTransformerWithRoPE ---
 class VisionTransformerWithRoPE(VisionTransformer):
     def __init__(self,
                  img_size=224,
                  patch_size=16,
-                 in_chans=3,  # 使用timm的命名习惯 'in_chans'
+                 in_chans=3,
                  num_classes=1000,
                  embed_dim=768,
                  depth=12,
                  num_heads=12,
                  mlp_ratio=4.0,
-                 qkv_bias=True, # 明确添加 qkv_bias
+                 qkv_bias=True,
                  **kwargs):
-
-        # --- 关键步骤 ---
-        # 调用父类构造函数，并强制设置我们需要的架构选项
         super().__init__(
             img_size=img_size,
             patch_size=patch_size,
@@ -419,48 +433,44 @@ class VisionTransformerWithRoPE(VisionTransformer):
             num_heads=num_heads,
             mlp_ratio=mlp_ratio,
             qkv_bias=qkv_bias,
-            class_token=False,  # 必须禁用 class token
-            pos_embed='none',   # 必须禁用 position embedding
-            global_pool='avg',  # 必须设置为 avg pooling
-            **kwargs            # 传递任何其他可能的参数
+            **kwargs
         )
 
-        # 实例化 RoPE 模块
+        # 禁用位置嵌入和 class token
+        self.pos_embed = None
+        self.cls_token = None
+        self.global_pool = 'avg'
+
+        # 实例化 RoPE
         head_dim = embed_dim // num_heads
         self.rope = RotaryEmbedding(dim=head_dim)
 
-        # 重建 blocks，注入我们自定义的 RopeAttention
-        # 注意: self.mlp_ratio, self.qkv_bias 等属性已由 super().__init__ 设置好
-        self.blocks = nn.ModuleList([
-            Block(
+        # 重建 block，使用 RopeBlock
+        self.blocks = nn.Sequential(*[
+            RopeBlock(
                 dim=embed_dim,
                 num_heads=num_heads,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
-                attn_class=partial(RopeAttention, rope=self.rope),
-                norm_layer=self.norm_layer,
-                act_layer=self.act_layer,
-                drop=self.drop_rate,
-                drop_path=self.dpr[i].item() if hasattr(self, 'dpr') and self.dpr is not None else 0.,
+                drop_path=self.drop_path_rate * i / depth if hasattr(self, "drop_path_rate") else 0.,
+                rope=self.rope
             )
-            for i in range(depth)])
+            for i in range(depth)
+        ])
 
+
+# --- 工厂函数 ---
 def create_rope_vit_model(config: Dict) -> VisionTransformerWithRoPE:
-    """
-    Factory function to create a VisionTransformer with RoPE from a config dictionary.
-    """
     model_config = config['model']
-    
-    # 使用我们的 VisionTransformerWithRoPE 类
     model = VisionTransformerWithRoPE(
         img_size=model_config['img_size'],
         patch_size=model_config['patch_size'],
-        in_chans=model_config.get('in_chans', 3), # 'in_channels' in user prompt, timm uses 'in_chans'
+        in_chans=model_config.get('in_chans', 3),
         embed_dim=model_config['embed_dim'],
         depth=model_config['depth'],
         num_heads=model_config['num_heads'],
         mlp_ratio=model_config.get('mlp_ratio', 4.0),
         num_classes=model_config['num_classes'],
-        qkv_bias=model_config.get('qkv_bias', True) # ViT-Base and others usually use bias
+        qkv_bias=model_config.get('qkv_bias', True),
     )
     return model
