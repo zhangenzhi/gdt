@@ -437,34 +437,22 @@ class VisionTransformerWithRoPE(VisionTransformer):
         # 因为我们通过 global_pool='mean' 已经处理了分类头的逻辑。
         # 父类的 forward_features 不再包含 cls_token 和 pos_embed 的相关操作。
 
-# --- 步骤 3: 创建一个工厂函数来方便地构建模型 ---
-def create_rope_vit_model(model_name='vit_base_patch16_224', **kwargs) -> VisionTransformerWithRoPE:
+def create_rope_vit_model(config: Dict) -> VisionTransformerWithRoPE:
     """
-    Factory function to create a Vision Transformer with RoPE.
-    
-    Args:
-        model_name (str): The name of a standard timm ViT model to get default configs from.
-        **kwargs: Additional arguments to override the default config.
-    
-    Returns:
-        An instance of VisionTransformerWithRoPE.
+    Factory function to create a VisionTransformer with RoPE from a config dictionary.
     """
-    # 从 timm 获取标准模型的配置
-    model_cfg = timm.models.get_model_config(model_name)
-    model_args = dict(
-        patch_size=model_cfg['patch_size'],
-        embed_dim=model_cfg['embed_dim'],
-        depth=model_cfg['depth'],
-        num_heads=model_cfg['num_heads'],
-        mlp_ratio=model_cfg['mlp_ratio'],
-        qkv_bias=True,  # 通常 ViT 中为 True
-        img_size=model_cfg['input_size'][-1]
+    model_config = config['model']
+    
+    # 使用我们的 VisionTransformerWithRoPE 类
+    model = VisionTransformerWithRoPE(
+        img_size=model_config['img_size'],
+        patch_size=model_config['patch_size'],
+        in_chans=model_config.get('in_chans', 3), # 'in_channels' in user prompt, timm uses 'in_chans'
+        embed_dim=model_config['embed_dim'],
+        depth=model_config['depth'],
+        num_heads=model_config['num_heads'],
+        mlp_ratio=model_config.get('mlp_ratio', 4.0),
+        num_classes=model_config['num_classes'],
+        qkv_bias=model_config.get('qkv_bias', True) # ViT-Base and others usually use bias
     )
-    
-    # 用用户传入的参数覆盖默认配置
-    model_args.update(kwargs)
-
-    # 实例化我们的 RoPE ViT 模型
-    model = VisionTransformerWithRoPE(**model_args)
-    
     return model
