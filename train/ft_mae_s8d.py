@@ -213,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae-n64-bz1024-w0/best_model.pth')
     
     parser.add_argument('--output', type=str, default='./output/finetune')
-    parser.add_argument('--savefile', type=str, default='seg-ft-s8d')
+    parser.add_argument('--savefile', type=str, default='seg-ft-sam-s8d')
     # 关键修改：更新了默认的数据目录
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/s8d/finetune/Noise_0.05_Blur_2_sparsity_2_NumAng_3600")
     parser.add_argument('--num_workers', type=int, default=16)
