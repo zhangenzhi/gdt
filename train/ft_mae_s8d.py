@@ -5,8 +5,6 @@ import logging
 import argparse
 from collections import OrderedDict
 
-# 新增的依赖，请确保已安装：pip install pandas tifffile
-import pandas as pd
 import tifffile
 import numpy as np
 
@@ -81,9 +79,7 @@ def calculate_dice_score(pred, target, num_classes, smooth=1e-5):
     mean_dice = torch.tensor(dice_list).mean().item()
     return mean_dice * 100
 
-# --------------------------------------------- #
-#   4. 训练与评估循环 (已更新)
-# --------------------------------------------- #
+
 def train_segmentation_model(model, train_loader, val_loader, criterion, optimizer, scheduler, config, device_id, args, start_epoch, best_val_dice=0.0, is_ddp=False):
     scaler = GradScaler(enabled=True)
     num_epochs = config['training']['num_epochs']
