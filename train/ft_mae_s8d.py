@@ -208,7 +208,7 @@ def segmentation_s8d_finetune_ddp(args, config, mae_config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Segmentation Model Finetuning on S8D")
     parser.add_argument('--task', type=str, default='segmentation_finetune_s8d')
-    parser.add_argument('--config', type=str, default='./configs/ft_mae_sam-b_S8D.yaml')
+    parser.add_argument('--config', type=str, default='./configs/ft-mae-sam-b_S8D.yaml')
     parser.add_argument('--mae_config', type=str, default='./configs/mae-vit-b_S8D.yaml') 
     parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae-n64-bz1024-w0/best_model.pth')
     
