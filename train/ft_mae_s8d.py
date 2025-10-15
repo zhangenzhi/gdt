@@ -217,6 +217,7 @@ if __name__ == "__main__":
     # 关键修改：更新了默认的数据目录
     parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/s8d/finetune/Noise_0.05_Blur_2_sparsity_2_NumAng_3600")
     parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     
     args = parser.parse_args()
 
