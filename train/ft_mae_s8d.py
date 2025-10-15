@@ -214,7 +214,7 @@ if __name__ == "__main__":
     parser.add_argument('--task', type=str, default='segmentation_finetune_s8d')
     parser.add_argument('--config', type=str, default='./configs/ft_mae_sam-b16_S8D.yaml')
     parser.add_argument('--mae_config', type=str, default='./configs/mae-vit-b16_S8D.yaml') 
-    parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae_vit-b128-s8d/best_model.pth')
+    parser.add_argument('--mae_checkpoint', type=str, default='./output/mae_pretrain/mae-n64-bz1024-w0/best_model.pth')
     
     parser.add_argument('--output', type=str, default='./output/finetune')
     parser.add_argument('--savefile', type=str, default='seg-ft-s8d')
