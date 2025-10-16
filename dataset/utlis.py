@@ -293,7 +293,7 @@ if __name__ == "__main__":
     # Input directory (original 3D volumes)
     raw_3d_dataset_dir = "/lustre/orion/lrn075/world-shared/Riken_XCT_Simulated_Data/8192x8192xN_Simulations/"
     # Output directory for 2D slices
-    raw_2d_dataset_dir = "/lustre/orion/lrn075/world-shared/Riken_XCT_Simulated_Data/8192x8192_2d_Simulations/"
+    raw_2d_dataset_dir = "/lustre/orion/lrn075/world-shared/enzhi/Riken_XCT_Simulated_Data/8192x8192_2d_Simulations/"
     sample_entries = os.listdir(raw_3d_dataset_dir)
     
     for setup in sample_entries:
