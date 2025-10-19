@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 def calculate_mean_std(image_paths, img_size):
     """
@@ -132,8 +133,10 @@ def create_dataloaders(data_dir, img_size, batch_size, num_workers=4):
     print(f"验证集数量: {len(val_paths)}")
     
     # --- 关键步骤：计算训练集的均值和标准差 ---
-    mean, std = calculate_mean_std(train_paths, img_size)
-
+    # mean, std = calculate_mean_std(train_paths, img_size)
+    mean= 0.7000
+    std = 0.1076
+    
     train_dataset = HydrogelDataset(
         image_paths=train_paths,
         mask_dir=mask_dir,
@@ -161,7 +164,7 @@ if __name__ == '__main__':
     # 更新为您的数据路径和参数
     DATA_DIR = '/work/c30636/dataset/hydrogel-s'
     IMG_SIZE = 1024
-    BATCH_SIZE = 2 # 1024x1024图像较大，减小batch size以防内存不足
+    BATCH_SIZE = 4 # 1024x1024图像较大，可以适当减小batch size以防内存不足
 
     if not os.path.exists(DATA_DIR):
         print(f"错误: 数据目录 '{DATA_DIR}' 不存在。请修改 DATA_DIR 变量。")
@@ -176,7 +179,39 @@ if __name__ == '__main__':
         print(f"图像像素值范围: [{images.min():.2f}, {images.max():.2f}]")
         print(f"蒙版像素值范围: [{masks.min()}, {masks.max()}]")
 
-        val_images, val_masks = next(iter(val_loader))
-        print(f"验证批次 - Images shape: {val_images.shape}")
-        print(f"验证批次 - Masks shape: {val_masks.shape}")
+        # --- 新增：可视化代码 ---
+        print("\n--- 可视化测试 ---")
+        print("正在为第一个批次生成可视化结果...")
+
+        num_to_show = min(BATCH_SIZE, 4) # 最多显示4张图
+        fig, axes = plt.subplots(num_to_show, 2, figsize=(10, num_to_show * 5))
+        if num_to_show == 1:
+            axes = np.array([axes])
+
+        fig.suptitle("Dataloader 本地测试可视化", fontsize=16)
+        
+        for i in range(num_to_show):
+            img_tensor = images[i]
+            mask_tensor = masks[i]
+            
+            # 将Tensor转换为Numpy array并移除通道维度以便显示
+            img_np = img_tensor.numpy().squeeze()
+            mask_np = mask_tensor.numpy().squeeze()
+            
+            # 显示图像
+            axes[i, 0].imshow(img_np, cmap='gray')
+            axes[i, 0].set_title(f"Image {i+1}")
+            axes[i, 0].axis('off')
+            
+            # 显示蒙版
+            axes[i, 1].imshow(mask_np, cmap='gray')
+            axes[i, 1].set_title(f"Mask {i+1}")
+            axes[i, 1].axis('off')
+            
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        
+        # 保存图片而不是直接显示，以兼容无GUI的服务器环境
+        save_path = "dataloader_test_visualization.png"
+        plt.savefig(save_path)
+        print(f"可视化结果已保存到: {save_path}")
 
