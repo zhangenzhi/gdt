@@ -159,7 +159,7 @@ def create_dataloaders(data_dir, img_size, batch_size, num_workers=4):
 
     return train_loader, val_loader
 
-# --- 本地测试 ---
+ --- 本地测试 ---
 if __name__ == '__main__':
     # 更新为您的数据路径和参数
     DATA_DIR = '/work/c30636/dataset/hydrogel-s'
@@ -214,4 +214,3 @@ if __name__ == '__main__':
         save_path = "dataloader_test_visualization.png"
         plt.savefig(save_path)
         print(f"可视化结果已保存到: {save_path}")
-
