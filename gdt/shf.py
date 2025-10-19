@@ -134,7 +134,7 @@ class ImagePatchify:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2RGB)
 
         # smooth_factor = random.choice(self.sths)
-        smooth_factor = 0
+        smooth_factor = 3
         if smooth_factor == 0 :
             edges = (np.random.uniform(low=0, high=255, size=img_np.shape[:2])).astype(np.uint8)
         else:
