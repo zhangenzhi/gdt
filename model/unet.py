@@ -134,7 +134,7 @@ if __name__ == '__main__':
         
         try:
             # 1. 创建模型并移至GPU
-            model_8k = create_unet_model(backbone_name='resnet34', pretrained=False, in_chans=1)
+            model_8k = create_unet_model(backbone_name='resnet18', pretrained=False, in_chans=1)
             model_8k.to(device)
             print(f"成功创建模型: {model_8k.__class__.__name__} with ResNet34 backbone")
 
