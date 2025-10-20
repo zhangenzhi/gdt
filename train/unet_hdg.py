@@ -292,13 +292,4 @@ if __name__ == "__main__":
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
-    # 命令行参数优先
-    if args.data_dir: config['data']['data_dir'] = args.data_dir
-    if args.output: config['output']['base_dir'] = args.output
-    if args.savefile: config['output']['save_dir'] = args.savefile
-        
-    args.data_dir = config['data']['data_dir']
-    args.output = config['output']['base_dir']
-    args.savefile = config['output']['save_dir']
-
     train(config, args)
