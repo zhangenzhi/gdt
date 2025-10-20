@@ -148,7 +148,7 @@ def train(config, args):
     # --- 数据加载 ---
     train_loader, val_loader = create_dataloaders(
         data_dir=args.data_dir,
-        img_size=config['data']['img_size'],
+        img_size=config['model']['img_size'],
         batch_size=config['training']['batch_size'],
         num_workers=config['training']['num_workers'],
         use_ddp=True
