@@ -34,100 +34,95 @@ class Up(nn.Module):
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # Concatenate along the channel dimension
+        # 保证跳跃连接的特征图尺寸与上采样的特征图尺寸一致
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-class CustomUNet(nn.Module):
-    def __init__(self, encoder, n_classes=1, bilinear=True):
+class UNetWithBackbone(nn.Module):
+    def __init__(self, backbone, n_classes=1, bilinear=True):
         super().__init__()
-        self.encoder = encoder
+        self.backbone = backbone
         self.n_classes = n_classes
         self.bilinear = bilinear
         
         # 获取编码器各阶段输出的通道数
-        encoder_channels = self.encoder.feature_info.channels()
+        encoder_channels = self.backbone.feature_info.channels()
         
-        # U-Net的瓶颈部分 (bottleneck)
-        self.bottleneck = DoubleConv(encoder_channels[-1], encoder_channels[-1] * 2)
-
-        # U-Net的解码器/上采样部分 (修正后的逻辑)
+        # U-Net的瓶颈部分 (通常是编码器最深层的输出)
+        # 我们直接使用编码器的最深层特征，不再额外加bottleneck层
+        
+        # U-Net的解码器/上采样部分
         self.up_layers = nn.ModuleList()
-        # 获取编码器各阶段输出的通道数，并将其反转以便从深到浅处理
-        reversed_encoder_channels = self.encoder.feature_info.channels()[::-1]
+        reversed_encoder_channels = encoder_channels[::-1]
         
-        # 从瓶颈层开始，这是解码器第一个上采样层的输入
-        channels_from_below = encoder_channels[-1] * 2
+        # 从最深层开始，这是解码器第一个上采样层的输入
+        channels_from_below = reversed_encoder_channels[0]
 
         # 遍历跳跃连接的通道数 (从深到浅)
-        # 我们跳过第一个 (reversed_encoder_channels[0])，因为它用于瓶颈层
+        # 我们跳过第一个 (reversed_encoder_channels[0])
         for skip_channels in reversed_encoder_channels[1:]:
-            # Up block的输入通道数 = 来自下一层的通道数 + 来自跳跃连接的通道数
             total_in_channels = channels_from_below + skip_channels
-            # Up block的输出通道数，通常设置为与跳跃连接的通道数相同
             out_channels = skip_channels
-            
             self.up_layers.append(Up(total_in_channels, out_channels, bilinear))
-            
-            # 更新下一轮循环的"来自下一层的通道数"
             channels_from_below = out_channels
 
-        # 最终输出层，其输入通道数应为最后一个Up block的输出通道数
+        # 最终输出层
+        # `timm`的ResNet backbone第一层stride=2，所以最终输出需要额外一次上采样
+        self.final_up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         self.outc = nn.Conv2d(channels_from_below, n_classes, kernel_size=1)
 
     def forward(self, x):
         # 编码器提取特征
-        features = self.encoder(x)
-        features.reverse()  # 将特征反转，方便从深到浅处理
+        features = self.backbone(x)
+        features.reverse()
         
-        # 瓶颈
-        x_bottleneck = self.bottleneck(features[0])
-
-        # 解码器和跳跃连接
-        x_decoder = x_bottleneck
+        x_decoder = features[0]
         for i, up_layer in enumerate(self.up_layers):
             skip_connection = features[i + 1]
             x_decoder = up_layer(x_decoder, skip_connection)
-
-        logits = self.outc(x_decoder)
         
-        # *** 新增: 最终上采样以匹配输入尺寸 ***
-        logits = F.interpolate(logits, size=x.shape[2:], mode='bilinear', align_corners=True)
-
+        # 最终上采样和输出
+        x_final = self.final_up(x_decoder)
+        logits = self.outc(x_final)
+        
         return logits
 
-def create_unet_model(encoder_name='efficientnet_b4', pretrained=True, in_chans=1):
+def create_unet_model(backbone_name='resnet34', pretrained=True, in_chans=1):
     """
-    使用timm库创建一个U-Net模型。
+    使用timm库和指定的backbone创建一个U-Net模型。
 
     Args:
-        encoder_name (str): timm中用作编码器的模型名称。
-        pretrained (bool): 是否加载在ImageNet上预训练的encoder权重。
-        in_chans (int): 输入图像的通道数 (例如，1代表灰度图，3代表RGB)。
+        backbone_name (str): timm中用作编码器的模型名称 (e.g., 'resnet34', 'resnet50').
+        pretrained (bool): 是否加载在ImageNet上预训练的backbone权重。
+        in_chans (int): 输入图像的通道数。
 
     Returns:
         torch.nn.Module: U-Net模型实例。
     """
-    encoder = timm.create_model(
-        encoder_name,
+    backbone = timm.create_model(
+        backbone_name,
         pretrained=pretrained,
         in_chans=in_chans,
-        features_only=True,  # <-- 关键：让模型返回中间层的特征图
+        features_only=True,
+        out_indices=(1, 2, 3, 4), # 指定输出4个阶段的特征图
     )
-    model = CustomUNet(encoder, n_classes=1)
+    model = UNetWithBackbone(backbone, n_classes=1)
     return model
-
 
 # --- 本地测试 ---
 if __name__ == '__main__':
-    # 测试创建单通道模型
-    # 注意：现在我们传入的是编码器的名称
-    model_1_chan = create_unet_model(encoder_name='efficientnet_b4', pretrained=False, in_chans=1)
-    print(f"成功创建基于timm encoder的U-Net模型: {model_1_chan.__class__.__name__}")
+    print("--- 针对1k图像，测试创建基于ResNet18的U-Net ---")
+    model_1k = create_unet_model(backbone_name='resnet18', pretrained=False, in_chans=1)
+    print(f"成功创建模型: {model_1k.__class__.__name__} with ResNet18 backbone")
     
-    dummy_input = torch.randn(2, 1, 1024, 1024)
-    output = model_1_chan(dummy_input)
+    dummy_input_1k = torch.randn(2, 1, 1024, 1024)
+    output_1k = model_1k(dummy_input_1k)
     
-    print(f"输入尺寸: {dummy_input.shape}")
-    print(f"输出尺寸: {output.shape}") # 应为 (2, 1, 1024, 1024)
-
+    print(f"1k 输入尺寸: {dummy_input_1k.shape}")
+    print(f"1k 输出尺寸: {output_1k.shape}")
+    assert dummy_input_1k.shape[2:] == output_1k.shape[2:], "1k 输出尺寸与输入尺寸不匹配!"
+    print("1k 模型结构验证成功。\n")
