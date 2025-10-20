@@ -1,6 +1,7 @@
 import timm
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class DoubleConv(nn.Module):
     """(Convolution => [BatchNorm] => ReLU) * 2"""
@@ -80,14 +81,19 @@ class CustomUNet(nn.Module):
         features.reverse()  # 将特征反转，方便从深到浅处理
         
         # 瓶颈
-        x = self.bottleneck(features[0])
+        x_bottleneck = self.bottleneck(features[0])
 
         # 解码器和跳跃连接
+        x_decoder = x_bottleneck
         for i, up_layer in enumerate(self.up_layers):
             skip_connection = features[i + 1]
-            x = up_layer(x, skip_connection)
+            x_decoder = up_layer(x_decoder, skip_connection)
 
-        logits = self.outc(x)
+        logits = self.outc(x_decoder)
+        
+        # *** 新增: 最终上采样以匹配输入尺寸 ***
+        logits = F.interpolate(logits, size=x.shape[2:], mode='bilinear', align_corners=True)
+
         return logits
 
 def create_unet_model(encoder_name='efficientnet_b4', pretrained=True, in_chans=1):
@@ -110,6 +116,7 @@ def create_unet_model(encoder_name='efficientnet_b4', pretrained=True, in_chans=
     )
     model = CustomUNet(encoder, n_classes=1)
     return model
+
 
 # --- 本地测试 ---
 if __name__ == '__main__':
