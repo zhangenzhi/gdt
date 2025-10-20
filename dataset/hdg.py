@@ -4,7 +4,8 @@ from glob import glob
 from PIL import Image
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
+import torch.distributed as dist
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from tqdm import tqdm
@@ -107,14 +108,12 @@ def get_transforms(img_size, mean, std, is_train=True):
             ToTensorV2(),
         ])
 
-def create_dataloaders(data_dir, img_size, batch_size, num_workers=4):
+def create_dataloaders(data_dir, img_size, batch_size, num_workers=4, use_ddp=False):
     """
-    创建训练和验证数据加载器。
-    验证集固定为7个样本，且必须包含 '1301100nm/19.jpg'。
+    创建支持DDP的训练和验证数据加载器。
     """
     image_dir = os.path.join(data_dir, 'revised-hydrogel')
     mask_dir = os.path.join(data_dir, 'masks-hydrogel')
-
     all_image_paths = sorted(glob(os.path.join(image_dir, '*/*.jpg')))
     
     val_specific_img = os.path.join(image_dir, '1301100nm', '19.jpg')
@@ -125,34 +124,51 @@ def create_dataloaders(data_dir, img_size, batch_size, num_workers=4):
     remaining_paths = [p for p in all_image_paths if p != val_specific_img]
     random.seed(42)
     val_paths.extend(random.sample(remaining_paths, 6))
-    
     train_paths = [p for p in all_image_paths if p not in val_paths]
 
-    print(f"数据集总数: {len(all_image_paths)}")
-    print(f"训练集数量: {len(train_paths)}")
-    print(f"验证集数量: {len(val_paths)}")
+    is_main_process = not use_ddp or (use_ddp and dist.get_rank() == 0)
     
-    # --- 关键步骤：计算训练集的均值和标准差 ---
-    mean, std = calculate_mean_std(train_paths, img_size)
+    if is_main_process:
+        print(f"数据集总数: {len(all_image_paths)}")
+        print(f"训练集数量: {len(train_paths)}")
+        print(f"验证集数量: {len(val_paths)}")
+    
+    mean, std = calculate_mean_std(train_paths, img_size, is_main_process)
 
     train_dataset = HydrogelDataset(
         image_paths=train_paths,
         mask_dir=mask_dir,
         transform=get_transforms(img_size, mean, std, is_train=True)
     )
+    # 附加均值和标准差，供后续使用
+    train_dataset.mean = mean
+    train_dataset.std = std
+    
     val_dataset = HydrogelDataset(
         image_paths=val_paths,
         mask_dir=mask_dir,
         transform=get_transforms(img_size, mean, std, is_train=False)
     )
 
+    train_sampler = None
+    if use_ddp:
+        train_sampler = DistributedSampler(train_dataset)
+
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True, drop_last=True
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=(train_sampler is None),
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True,
+        sampler=train_sampler
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True
+        val_dataset,
+        batch_size=len(val_paths), # 加载所有验证图像
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True
     )
 
     return train_loader, val_loader
