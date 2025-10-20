@@ -122,6 +122,7 @@ if __name__ == '__main__':
     print("1k 模型结构验证成功。\n")
 
     print("--- 针对8k图像，测试创建基于ResNet34的U-Net (包括前向和反向传播) ---")
+    model_8k = None # 初始化变量
     if not torch.cuda.is_available():
         print("未检测到CUDA GPU，跳过8k显存占用测试。")
     else:
@@ -134,7 +135,7 @@ if __name__ == '__main__':
         
         try:
             # 1. 创建模型并移至GPU
-            model_8k = create_unet_model(backbone_name='resnet18', pretrained=False, in_chans=1)
+            model_8k = create_unet_model(backbone_name='resnet34', pretrained=False, in_chans=1)
             model_8k.to(device)
             print(f"成功创建模型: {model_8k.__class__.__name__} with ResNet34 backbone")
 
@@ -169,13 +170,60 @@ if __name__ == '__main__':
             backward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
             print("反向传播完成。")
             print(f"前向+反向传播峰值显存占用: {backward_mem:.2f} GB")
-            print("\n8k 模型结构和显存占用验证成功。")
+            print("\n8k 模型结构和显存占用验证成功。\n")
 
         except torch.cuda.OutOfMemoryError:
             print("\n错误: 发生CUDA显存不足错误!")
             peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3
             print(f"峰值显存占用达到 {peak_mem:.2f} GB 时发生错误。")
-            print("请考虑使用更轻量的backbone，减小图像尺寸，或使用梯度累积等技术。")
+            print("请考虑使用更轻量的backbone，减小图像尺寸，或使用梯度累积等技术。\n")
         except Exception as e:
-            print(f"\n在测试8k输入时遇到意外错误: {e}")
+            print(f"\n在测试8k输入时遇到意外错误: {e}\n")
+
+    print("--- 针对32k图像，测试下采样->8k处理方案 ---")
+    if not torch.cuda.is_available():
+        print("未检测到CUDA GPU，跳过32k下采样方案测试。")
+    elif model_8k is None:
+        print("由于8k模型未能成功创建，跳过32k下采样方案测试。")
+    else:
+        print("正在清空CUDA缓存...")
+        torch.cuda.empty_cache()
+        
+        device = torch.device("cuda")
+        print(f"在GPU上进行测试: {torch.cuda.get_device_name(0)}")
+
+        try:
+            # 1. 直接复用之前在GPU上的8k模型
+            print(f"复用模型: {model_8k.__class__.__name__} with ResNet34 backbone")
+
+            # 2. 创建一个32k的虚拟输入图像
+            dummy_input_32k = torch.randn(1, 1, 32768, 32768, device=device, dtype=torch.bfloat16)
+            print(f"原始32k输入尺寸: {dummy_input_32k.shape}")
+
+            # 3. 将32k图像下采样到8k
+            print("将32k输入下采样至8k...")
+            downsampled_input_8k = F.interpolate(dummy_input_32k, size=(8192, 8192), mode='bilinear', align_corners=False)
+            print(f"下采样后输入尺寸: {downsampled_input_8k.shape}")
+            
+            # 4. 使用模型处理8k图像 (autocast context is recommended)
+            print("正在处理8k图像...")
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                output_from_downsampled = model_8k(downsampled_input_8k)
+            print(f"模型输出的8k蒙版尺寸: {output_from_downsampled.shape}")
+
+            # 5. 将8k的输出上采样回32k
+            print("将8k输出上采样回32k...")
+            final_output_32k = F.interpolate(output_from_downsampled, size=(32768, 32768), mode='bilinear', align_corners=False)
+            print(f"最终32k输出尺寸: {final_output_32k.shape}")
+
+            # 6. 验证最终尺寸
+            assert dummy_input_32k.shape[2:] == final_output_32k.shape[2:], "32k最终输出尺寸与原始输入尺寸不匹配!"
+            print("\n32k下采样方案验证成功!")
+
+        except torch.cuda.OutOfMemoryError:
+            print("\n错误: 即使在处理下采样后的8k图像时也发生了CUDA显存不足错误!")
+            peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print(f"峰值显存占用达到 {peak_mem:.2f} GB 时发生错误。")
+        except Exception as e:
+            print(f"\n在测试32k下采样方案时遇到意外错误: {e}")
 
