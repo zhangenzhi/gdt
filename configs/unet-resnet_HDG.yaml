@@ -6,7 +6,7 @@ task_name: "unet_resnet18_1k_run"
 # 1. Model Configuration
 model:
   # You can choose from 'resnet18', 'resnet34', 'resnet50', etc.
-  backbone_name: 'resnet18'
+  backbone_name: 'resnet34'
   pretrained: False
   in_chans: 1
   num_classes: 1
