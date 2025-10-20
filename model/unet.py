@@ -50,19 +50,29 @@ class CustomUNet(nn.Module):
         # U-Net的瓶颈部分 (bottleneck)
         self.bottleneck = DoubleConv(encoder_channels[-1], encoder_channels[-1] * 2)
 
-        # U-Net的解码器/上采样部分
-        # 我们从倒数第二层特征开始，逐级向上
-        decoder_in_channels = [encoder_channels[-1] * 2] + encoder_channels[::-1][:-1]
-        decoder_out_channels = encoder_channels[::-1]
-        
+        # U-Net的解码器/上采样部分 (修正后的逻辑)
         self.up_layers = nn.ModuleList()
-        for i in range(len(encoder_channels) - 1):
-            in_ch = decoder_in_channels[i] + decoder_out_channels[i+1]
-            out_ch = decoder_out_channels[i+1]
-            self.up_layers.append(Up(in_ch, out_ch, bilinear))
+        # 获取编码器各阶段输出的通道数，并将其反转以便从深到浅处理
+        reversed_encoder_channels = self.encoder.feature_info.channels()[::-1]
+        
+        # 从瓶颈层开始，这是解码器第一个上采样层的输入
+        channels_from_below = encoder_channels[-1] * 2
 
-        # 最终输出层
-        self.outc = nn.Conv2d(encoder_channels[0], n_classes, kernel_size=1)
+        # 遍历跳跃连接的通道数 (从深到浅)
+        # 我们跳过第一个 (reversed_encoder_channels[0])，因为它用于瓶颈层
+        for skip_channels in reversed_encoder_channels[1:]:
+            # Up block的输入通道数 = 来自下一层的通道数 + 来自跳跃连接的通道数
+            total_in_channels = channels_from_below + skip_channels
+            # Up block的输出通道数，通常设置为与跳跃连接的通道数相同
+            out_channels = skip_channels
+            
+            self.up_layers.append(Up(total_in_channels, out_channels, bilinear))
+            
+            # 更新下一轮循环的"来自下一层的通道数"
+            channels_from_below = out_channels
+
+        # 最终输出层，其输入通道数应为最后一个Up block的输出通道数
+        self.outc = nn.Conv2d(channels_from_below, n_classes, kernel_size=1)
 
     def forward(self, x):
         # 编码器提取特征
