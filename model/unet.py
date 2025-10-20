@@ -125,6 +125,10 @@ if __name__ == '__main__':
     if not torch.cuda.is_available():
         print("未检测到CUDA GPU，跳过8k显存占用测试。")
     else:
+        # 清空1k测试可能占用的缓存，确保8k测试的显存测量更准确
+        print("正在清空CUDA缓存...")
+        torch.cuda.empty_cache()
+        
         device = torch.device("cuda")
         print(f"检测到GPU: {torch.cuda.get_device_name(0)}")
         
