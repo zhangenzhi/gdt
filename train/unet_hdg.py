@@ -284,7 +284,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='./configs/unet-resnet_HDG.yaml', help='配置文件路径')
     parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/hydrogel-s', help='数据集目录路径 (覆盖配置文件中的设置)')
     parser.add_argument('--output', type=str, default='./output', help='输出根目录 (覆盖配置文件中的设置)')
-    parser.add_argument('--savefile', type=str, default='unet_resnet18_1k', help='本次运行的保存文件夹名 (覆盖配置文件中的设置)')
+    parser.add_argument('--savefile', type=str, default='unet_resnet18_1k-ep300', help='本次运行的保存文件夹名 (覆盖配置文件中的设置)')
     parser.add_argument('--reload', action='store_true', help='从最新的检查点恢复训练')
     
     args = parser.parse_args()
