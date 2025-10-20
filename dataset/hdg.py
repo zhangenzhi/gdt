@@ -52,13 +52,15 @@ def calculate_mean_std(image_paths, img_size, is_main_process):
     return mean, std
 
 class HydrogelDataset(Dataset):
-    """用于水凝胶图像分割的数据集类。"""
+    """
+    用于水凝胶图像分割的数据集类。
+    """
     def __init__(self, image_paths, mask_dir, transform=None):
         self.image_paths = image_paths
         self.mask_dir = mask_dir
         self.transform = transform
-        self.mean = 0
-        self.std = 1
+        self.mean = 0.0
+        self.std = 1.0
 
     def __len__(self):
         return len(self.image_paths)
@@ -66,9 +68,15 @@ class HydrogelDataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
         image = np.array(Image.open(img_path).convert("L"))
+
         mask_path = img_path.replace('revised-hydrogel', os.path.basename(self.mask_dir))
-        mask = np.array(Image.open(mask_path).convert("L"), dtype=np.float32)
-        mask[mask == 255.0] = 1.0
+        
+        # --- **关键修正** ---
+        # 1. 加载原始的uint8蒙版图像
+        mask_raw = np.array(Image.open(mask_path).convert("L"))
+        # 2. 正确地进行二值化：任何非0像素都为1，0像素保持为0
+        # 3. 确保最终类型是float32
+        mask = (mask_raw > 0).astype(np.float32)
 
         if self.transform:
             augmented = self.transform(image=image, mask=mask)
@@ -86,6 +94,16 @@ def get_transforms(img_size, mean, std, is_train=True):
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.RandomRotate90(p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
+            A.OneOf([
+                A.ElasticTransform(p=0.3),
+                A.GridDistortion(p=0.3),
+                A.OpticalDistortion(p=0.3)
+            ], p=0.3),
+            A.OneOf([
+                A.RandomBrightnessContrast(p=0.5),
+                A.RandomGamma(p=0.5),
+            ], p=0.5),
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
         ])
