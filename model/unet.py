@@ -180,7 +180,7 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"\n在测试8k输入时遇到意外错误: {e}\n")
 
-    print("--- 针对32k图像，测试下采样->8k处理方案 ---")
+    print("--- 针对32k图像，测试下采样->8k处理方案 (包括后向梯度计算) ---")
     if not torch.cuda.is_available():
         print("未检测到CUDA GPU，跳过32k下采样方案测试。")
     elif model_8k is None:
@@ -196,8 +196,9 @@ if __name__ == '__main__':
             # 1. 直接复用之前在GPU上的8k模型
             print(f"复用模型: {model_8k.__class__.__name__} with ResNet34 backbone")
 
-            # 2. 创建一个32k的虚拟输入图像
+            # 2. 创建一个32k的虚拟输入和目标图像
             dummy_input_32k = torch.randn(1, 1, 32768, 32768, device=device, dtype=torch.bfloat16)
+            dummy_target_32k = torch.rand(1, 1, 32768, 32768, device=device, dtype=torch.bfloat16)
             print(f"原始32k输入尺寸: {dummy_input_32k.shape}")
 
             # 3. 将32k图像下采样到8k
@@ -206,19 +207,31 @@ if __name__ == '__main__':
             print(f"下采样后输入尺寸: {downsampled_input_8k.shape}")
             
             # 4. 使用模型处理8k图像 (autocast context is recommended)
-            print("正在处理8k图像...")
+            print("正在处理8k图像 (前向传播)...")
+            torch.cuda.reset_peak_memory_stats(device)
+            
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 output_from_downsampled = model_8k(downsampled_input_8k)
-            print(f"模型输出的8k蒙版尺寸: {output_from_downsampled.shape}")
+                
+                # 5. 将8k的输出上采样回32k
+                final_output_32k = F.interpolate(output_from_downsampled, size=(32768, 32768), mode='bilinear', align_corners=False)
+                
+                # 6. 在完整的32k尺度上计算损失
+                loss = F.mse_loss(final_output_32k, dummy_target_32k)
 
-            # 5. 将8k的输出上采样回32k
-            print("将8k输出上采样回32k...")
-            final_output_32k = F.interpolate(output_from_downsampled, size=(32768, 32768), mode='bilinear', align_corners=False)
-            print(f"最终32k输出尺寸: {final_output_32k.shape}")
-
-            # 6. 验证最终尺寸
+            forward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print(f"前向传播完成。最终32k输出尺寸: {final_output_32k.shape}")
             assert dummy_input_32k.shape[2:] == final_output_32k.shape[2:], "32k最终输出尺寸与原始输入尺寸不匹配!"
-            print("\n32k下采样方案验证成功!")
+            print(f"32k方案前向传播峰值显存: {forward_mem:.2f} GB")
+
+            # 7. 执行后向传播计算梯度
+            print("正在执行后向传播...")
+            loss.backward()
+            
+            backward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print("后向传播完成。")
+            print(f"32k方案前向+后向传播峰值显存: {backward_mem:.2f} GB")
+            print("\n32k下采样方案及梯度计算验证成功!")
 
         except torch.cuda.OutOfMemoryError:
             print("\n错误: 即使在处理下采样后的8k图像时也发生了CUDA显存不足错误!")
