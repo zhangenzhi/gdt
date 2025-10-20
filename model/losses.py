@@ -25,7 +25,7 @@ class DiceBCELoss(nn.Module):
         # 将张量展平以便计算
         probs = probs.view(-1)
         targets = targets.view(-1)
-        print(f"probs:{probs.mean()}, targets:{targets.mean(), targets.max(), targets.min()}")
+        # print(f"probs:{probs.mean()}, targets:{targets.mean(), targets.max(), targets.min()}")
         
         # --- 1. BCE Loss component ---
         # 直接在logits上使用BCEWithLogitsLoss以保证数值稳定性
@@ -38,7 +38,7 @@ class DiceBCELoss(nn.Module):
         # Dice Loss的正确形式是 1 - Dice系数
         # 它的值域是 [0, 1]，永远不会是负数。
         dice_loss = 1 - dice_coeff
-        print(f"dice_loss:{dice_loss}, bce_loss:{bce_loss}")
+        # print(f"dice_loss:{dice_loss}, bce_loss:{bce_loss}")
         # 最终损失是两者的和
         loss = bce_loss + dice_loss
         return loss
