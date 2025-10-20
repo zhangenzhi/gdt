@@ -1,0 +1,41 @@
+# Configuration for the U-Net Hydrogel Segmentation Model
+
+# A name for this specific experiment run, used for creating output directories
+task_name: "unet_resnet18_1k_run"
+
+# 1. Model Configuration
+model:
+  # You can choose from 'resnet18', 'resnet34', 'resnet50', etc.
+  backbone_name: 'resnet18'
+  pretrained: True
+  in_chans: 1
+  num_classes: 1
+  # The size the images will be resized to
+  img_size: 1024
+
+# 2. Training Hyperparameters
+training:
+  optimizer: "AdamW"
+  learning_rate: 0.001
+  # Betas for AdamW optimizer
+  betas: [0.9, 0.999]
+  weight_decay: 0.05
+  warmup_epochs: 5
+  # Minimum learning rate for cosine annealing
+  eta_min: 0.000001
+
+  num_epochs: 100
+  # Batch size per GPU
+  batch_size: 4
+  # Accumulate gradients over N steps before updating weights
+  gradient_accumulation_steps: 2
+
+  # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
+  use_compile: False
+
+# 3. Data Configuration
+data:
+  # Root directory path of the dataset (can be overridden by command line)
+  data_dir: '/work/c30636/dataset/hydrogel-s'
+  # Number of worker processes for DataLoader
+  num_workers: 8

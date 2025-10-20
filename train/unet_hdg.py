@@ -1,217 +1,302 @@
 import os
-import random
-from glob import glob
-from PIL import Image
-import numpy as np
-import torch
-from torch.utils.data import Dataset, DataLoader
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+import sys
+import yaml
+import logging
+import argparse
+import contextlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-def calculate_mean_std(image_paths, img_size):
-    """
-    遍历所有训练图像，计算单通道的均值和标准差。
+import torch
+from torch import nn
+import torch.distributed as dist
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.cuda.amp import GradScaler, autocast
+
+# --- 导入我们自己的模块 ---
+from model.unet import create_unet_model
+from model.losses import DiceBCELoss
+from dataset.hdg import create_dataloaders
+
+def setup_logging(output_dir, save_dir):
+    """配置日志记录到文件和控制台。"""
+    log_dir = os.path.join(output_dir, save_dir)
+    os.makedirs(log_dir, exist_ok=True)
     
-    Args:
-        image_paths (list): 训练图像的路径列表。
-        img_size (int): 图像的目标尺寸。
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    
+    # 清除所有现有的处理器
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
         
-    Returns:
-        tuple: (mean, std)
-    """
-    print("正在计算训练数据集的均值和标准差...")
-    total_pixels = 0
-    sum_pixels = 0.0
-    sum_sq_pixels = 0.0
+    logging.basicConfig(
+        level=logging.INFO,
+        format=f'%(asctime)s - RANK {rank} - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(os.path.join(log_dir, "train.log")),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
 
-    for path in tqdm(image_paths, desc="正在计算统计数据"):
-        # 以单通道（灰度）模式打开图像
-        img = Image.open(path).convert('L')
-        # 调整尺寸以匹配训练输入
-        img = img.resize((img_size, img_size), Image.Resampling.BILINEAR)
-        img_np = np.array(img, dtype=np.float64) / 255.0
+def get_dice_score(logits, targets, smooth=1e-6):
+    """计算Dice系数 metric。"""
+    probs = torch.sigmoid(logits)
+    preds = (probs > 0.5).float()
+    
+    preds = preds.view(-1)
+    targets = targets.view(-1)
+    
+    intersection = (preds * targets).sum()
+    dice = (2. * intersection + smooth) / (preds.sum() + targets.sum() + smooth)
+    return dice
 
-        sum_pixels += np.sum(img_np)
-        sum_sq_pixels += np.sum(np.square(img_np))
-        total_pixels += img_np.size
+def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds, val_loader):
+    """可视化验证集上的预测结果并保存为图片。"""
+    # 反归一化
+    mean, std = val_loader.dataset.mean, val_loader.dataset.std
+    
+    fig, axes = plt.subplots(3, 7, figsize=(28, 12))
+    fig.suptitle(f'Epoch {epoch + 1} Validation Results', fontsize=20)
+    
+    for i in range(7):
+        img = images[i].cpu().numpy().transpose(1, 2, 0)
+        img = (img * std) + mean # 反归一化
+        img = img.clip(0, 1)
 
-    mean = sum_pixels / total_pixels
-    std = np.sqrt(sum_sq_pixels / total_pixels - np.square(mean))
+        tgt = targets[i].cpu().numpy().squeeze()
+        prd = preds[i].cpu().numpy().squeeze()
 
-    print("计算完成。")
-    print(f"计算出的均值 (Mean): {mean:.4f}")
-    print(f"计算出的标准差 (Std): {std:.4f}")
-    return mean, std
+        axes[0, i].imshow(img, cmap='gray')
+        axes[0, i].set_title(f'Image {i+1}')
+        axes[0, i].axis('off')
 
+        axes[1, i].imshow(tgt, cmap='gray')
+        axes[1, i].set_title(f'Ground Truth')
+        axes[1, i].axis('off')
 
-class HydrogelDataset(Dataset):
-    """
-    用于水凝胶图像分割的数据集类。
-    自动匹配 'revised-hydrogel' 中的原图和 'masks-hydrogel' 中的蒙版。
-    """
-    def __init__(self, image_paths, mask_dir, transform=None):
-        self.image_paths = image_paths
-        self.mask_dir = mask_dir
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def __getitem__(self, idx):
-        img_path = self.image_paths[idx]
-        # 以单通道（灰度）模式加载图像
-        image = np.array(Image.open(img_path).convert("L"))
-
-        mask_path = img_path.replace('revised-hydrogel', os.path.basename(self.mask_dir))
-        mask = np.array(Image.open(mask_path).convert("L"), dtype=np.float32)
+        axes[2, i].imshow(prd, cmap='gray')
+        axes[2, i].set_title(f'Prediction')
+        axes[2, i].axis('off')
         
-        mask[mask == 255.0] = 1.0
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    save_path = os.path.join(output_dir, save_dir, f"validation_epoch_{epoch+1}.png")
+    plt.savefig(save_path)
+    plt.close()
+    logging.info(f"验证结果可视化已保存至: {save_path}")
 
-        if self.transform:
-            augmented = self.transform(image=image, mask=mask)
-            image = augmented['image']
-            mask = augmented['mask']
-            mask = mask.unsqueeze(0)
 
-        return image, mask
+def evaluate(model, val_loader, criterion, device, epoch, args):
+    """评估模型并可视化结果。"""
+    model.eval()
+    total_val_loss = 0.0
+    total_dice_score = 0.0
+    
+    # 用于可视化的容器
+    all_images, all_targets, all_preds = [], [], []
 
-def get_transforms(img_size, mean, std, is_train=True):
-    """获取训练或验证所需的数据增强流程。"""
-    if is_train:
-        return A.Compose([
-            A.Resize(img_size, img_size),
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
-            A.OneOf([
-                A.ElasticTransform(p=0.3),
-                A.GridDistortion(p=0.3),
-                A.OpticalDistortion(p=0.3)
-            ], p=0.3),
-            A.OneOf([
-                A.RandomBrightnessContrast(p=0.5),
-                A.RandomGamma(p=0.5),
-            ], p=0.5),
-            # 使用计算出的单通道均值和标准差进行归一化
-            A.Normalize(mean=(mean,), std=(std,)),
-            ToTensorV2(),
-        ])
+    with torch.no_grad():
+        for images, targets in tqdm(val_loader, desc=f"Epoch {epoch+1} Validation", disable=(dist.get_rank() != 0)):
+            images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+            
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
+                logits = model(images)
+                loss = criterion(logits, targets)
+            
+            total_val_loss += loss.item()
+            total_dice_score += get_dice_score(logits, targets).item()
+
+            if dist.get_rank() == 0: # 仅在主进程收集可视化数据
+                all_images.append(images)
+                all_targets.append(targets)
+                all_preds.append((torch.sigmoid(logits) > 0.5).float())
+
+    avg_val_loss = total_val_loss / len(val_loader)
+    avg_dice_score = total_dice_score / len(val_loader)
+
+    # 在DDP中同步所有进程的评估结果
+    metrics_tensor = torch.tensor([avg_val_loss, avg_dice_score], device=device)
+    dist.all_reduce(metrics_tensor, op=dist.ReduceOp.AVG)
+    
+    synced_loss, synced_dice = metrics_tensor.tolist()
+
+    if dist.get_rank() == 0:
+        visualize_predictions(
+            epoch, args.output, args.savefile,
+            torch.cat(all_images), torch.cat(all_targets), torch.cat(all_preds),
+            val_loader
+        )
+
+    return synced_loss, synced_dice
+
+
+def train(config, args):
+    """主训练函数"""
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    device = torch.device("cuda", local_rank)
+    torch.cuda.set_device(device)
+    dist.init_process_group(backend='nccl')
+
+    is_main_process = (local_rank == 0)
+    if is_main_process:
+        setup_logging(args.output, args.savefile)
+        logging.info(f"开始训练，使用 {world_size} 个进程，设备类型: {device.type}")
+
+    # --- 数据加载 ---
+    train_loader, val_loader = create_dataloaders(
+        data_dir=args.data_dir,
+        img_size=config['data']['img_size'],
+        batch_size=config['training']['batch_size'],
+        num_workers=config['training']['num_workers'],
+        use_ddp=True
+    )
+    # 将计算出的mean和std附加到val_loader.dataset以供可视化使用
+    val_loader.dataset.mean, val_loader.dataset.std = train_loader.dataset.mean, train_loader.dataset.std
+
+    # --- 模型创建 ---
+    if is_main_process: logging.info(f"正在创建模型: U-Net with {config['model']['backbone_name']} backbone")
+    model = create_unet_model(
+        backbone_name=config['model']['backbone_name'],
+        pretrained=config['model']['pretrained'],
+        in_chans=config['model']['in_chans']
+    ).to(device)
+
+    if config['training'].get('use_compile', False):
+        if is_main_process: logging.info("正在应用 torch.compile()...")
+        model = torch.compile(model)
+        
+    model = DDP(model, device_ids=[local_rank])
+
+    # --- 损失，优化器，调度器 ---
+    criterion = DiceBCELoss()
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config['training']['learning_rate'],
+        weight_decay=config['training']['weight_decay']
+    )
+    
+    num_epochs = config['training']['num_epochs']
+    warmup_epochs = config['training'].get('warmup_epochs', 0)
+    accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
+    
+    optimizer_steps_per_epoch = len(train_loader) // accumulation_steps
+    num_training_steps = num_epochs * optimizer_steps_per_epoch
+    num_warmup_steps = warmup_epochs * optimizer_steps_per_epoch
+    
+    if num_warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
-        return A.Compose([
-            A.Resize(img_size, img_size),
-            # 对验证集也使用相同的均值和标准差
-            A.Normalize(mean=(mean,), std=(std,)),
-            ToTensorV2(),
-        ])
-
-def create_dataloaders(data_dir, img_size, batch_size, num_workers=4):
-    """
-    创建训练和验证数据加载器。
-    验证集固定为7个样本，且必须包含 '1301100nm/19.jpg'。
-    """
-    image_dir = os.path.join(data_dir, 'revised-hydrogel')
-    mask_dir = os.path.join(data_dir, 'masks-hydrogel')
-
-    all_image_paths = sorted(glob(os.path.join(image_dir, '*/*.jpg')))
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
     
-    val_specific_img = os.path.join(image_dir, '1301100nm', '19.jpg')
-    if val_specific_img not in all_image_paths:
-        raise FileNotFoundError(f"指定的验证图片未找到: {val_specific_img}")
+    scaler = GradScaler(enabled=True)
 
-    val_paths = [val_specific_img]
-    remaining_paths = [p for p in all_image_paths if p != val_specific_img]
-    random.seed(42)
-    val_paths.extend(random.sample(remaining_paths, 6))
-    
-    train_paths = [p for p in all_image_paths if p not in val_paths]
+    # --- 检查点加载 ---
+    start_epoch = 0
+    best_dice = 0.0
+    checkpoint_dir = os.path.join(args.output, args.savefile)
+    latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
 
-    print(f"数据集总数: {len(all_image_paths)}")
-    print(f"训练集数量: {len(train_paths)}")
-    print(f"验证集数量: {len(val_paths)}")
-    
-    # --- 关键步骤：计算训练集的均值和标准差 ---
-    # mean, std = calculate_mean_std(train_paths, img_size)
-    mean= 0.7000
-    std = 0.1076
-    
-    train_dataset = HydrogelDataset(
-        image_paths=train_paths,
-        mask_dir=mask_dir,
-        transform=get_transforms(img_size, mean, std, is_train=True)
-    )
-    val_dataset = HydrogelDataset(
-        image_paths=val_paths,
-        mask_dir=mask_dir,
-        transform=get_transforms(img_size, mean, std, is_train=False)
-    )
+    if args.reload and os.path.exists(latest_checkpoint_path):
+        if is_main_process: logging.info(f"从检查点恢复训练: {latest_checkpoint_path}")
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}
+        checkpoint = torch.load(latest_checkpoint_path, map_location=map_location)
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_dice = checkpoint['best_dice']
+        if is_main_process: logging.info(f"成功恢复，将从 Epoch {start_epoch + 1} 开始。")
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True, drop_last=True
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True
-    )
+    # --- 训练循环 ---
+    if is_main_process:
+        logging.info(f"开始训练，总共 {num_epochs} 个 epochs...")
+        logging.info(f"配置: {config}")
 
-    return train_loader, val_loader
-
-# --- 本地测试 ---
-if __name__ == '__main__':
-    # 更新为您的数据路径和参数
-    DATA_DIR = '/work/c30636/dataset/hydrogel-s'
-    IMG_SIZE = 1024
-    BATCH_SIZE = 4 # 1024x1024图像较大，可以适当减小batch size以防内存不足
-
-    if not os.path.exists(DATA_DIR):
-        print(f"错误: 数据目录 '{DATA_DIR}' 不存在。请修改 DATA_DIR 变量。")
-    else:
-        train_loader, val_loader = create_dataloaders(DATA_DIR, IMG_SIZE, BATCH_SIZE)
-
-        print("\n--- Dataloader 测试 ---")
-        images, masks = next(iter(train_loader))
-        # 期望的尺寸: [Batch, Channel=1, Height, Width]
-        print(f"训练批次 - Images shape: {images.shape}, type: {images.dtype}")
-        print(f"训练批次 - Masks shape: {masks.shape}, type: {masks.dtype}")
-        print(f"图像像素值范围: [{images.min():.2f}, {images.max():.2f}]")
-        print(f"蒙版像素值范围: [{masks.min()}, {masks.max()}]")
-
-        # --- 新增：可视化代码 ---
-        print("\n--- 可视化测试 ---")
-        print("正在为第一个批次生成可视化结果...")
-
-        num_to_show = min(BATCH_SIZE, 4) # 最多显示4张图
-        fig, axes = plt.subplots(num_to_show, 2, figsize=(10, num_to_show * 5))
-        if num_to_show == 1:
-            axes = np.array([axes])
-
-        fig.suptitle("Dataloader 本地测试可视化", fontsize=16)
+    for epoch in range(start_epoch, num_epochs):
+        train_loader.sampler.set_epoch(epoch)
+        model.train()
         
-        for i in range(num_to_show):
-            img_tensor = images[i]
-            mask_tensor = masks[i]
-            
-            # 将Tensor转换为Numpy array并移除通道维度以便显示
-            img_np = img_tensor.numpy().squeeze()
-            mask_np = mask_tensor.numpy().squeeze()
-            
-            # 显示图像
-            axes[i, 0].imshow(img_np, cmap='gray')
-            axes[i, 0].set_title(f"Image {i+1}")
-            axes[i, 0].axis('off')
-            
-            # 显示蒙版
-            axes[i, 1].imshow(mask_np, cmap='gray')
-            axes[i, 1].set_title(f"Mask {i+1}")
-            axes[i, 1].axis('off')
-            
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        
-        # 保存图片而不是直接显示，以兼容无GUI的服务器环境
-        save_path = "dataloader_test_visualization.png"
-        plt.savefig(save_path)
-        print(f"可视化结果已保存到: {save_path}")
+        running_loss = 0.0
+        optimizer.zero_grad()
 
+        for i, (images, targets) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1} Training", disable=(not is_main_process))):
+            images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+            
+            is_sync_step = (i + 1) % accumulation_steps == 0
+            sync_context = contextlib.nullcontext() if is_sync_step else model.no_sync()
+            
+            with sync_context:
+                with autocast(device_type='cuda', dtype=torch.bfloat16):
+                    logits = model(images)
+                    loss = criterion(logits, targets)
+                    loss = loss / accumulation_steps
+                
+                scaler.scale(loss).backward()
+            
+            if is_sync_step:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                scheduler.step()
+            
+            running_loss += loss.item() * accumulation_steps
+            
+        avg_train_loss = running_loss / len(train_loader)
+        
+        # --- 评估 ---
+        val_loss, val_dice = evaluate(model, val_loader, criterion, device, epoch, args)
+        
+        if is_main_process:
+            current_lr = optimizer.param_groups[0]['lr']
+            logging.info(f"Epoch {epoch + 1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Dice: {val_dice:.4f} | LR: {current_lr:.6f}")
+            
+            # 保存最新检查点
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.module.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),
+                'best_dice': best_dice,
+            }, latest_checkpoint_path)
+
+            # 如果是最佳模型，则另外保存一份
+            if val_dice > best_dice:
+                best_dice = val_dice
+                logging.info(f"发现新的最佳模型，Dice: {best_dice:.4f}. 正在保存...")
+                best_checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
+                torch.save(model.module.state_dict(), best_checkpoint_path)
+
+    if is_main_process:
+        logging.info(f'训练完成. 最佳验证Dice系数: {best_dice:.4f}')
+    
+    dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="U-Net Hydrogel Segmentation Training Script")
+    parser.add_argument('--config', type=str, default='./configs/unet-resnet_HDG.yaml', help='配置文件路径')
+    parser.add_argument('--data_dir', type=str, default='/work/c30636/dataset/hydrogel-s', help='数据集目录路径 (覆盖配置文件中的设置)')
+    parser.add_argument('--output', type=str, default='./output', help='输出根目录 (覆盖配置文件中的设置)')
+    parser.add_argument('--savefile', type='unet_resnet18_1k', default='unet_resnet18_1k', help='本次运行的保存文件夹名 (覆盖配置文件中的设置)')
+    parser.add_argument('--reload', action='store_true', help='从最新的检查点恢复训练')
+    
+    args = parser.parse_args()
+    
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # 命令行参数优先
+    if args.data_dir: config['data']['data_dir'] = args.data_dir
+    if args.output: config['output']['base_dir'] = args.output
+    if args.savefile: config['output']['save_dir'] = args.savefile
+        
+    args.data_dir = config['data']['data_dir']
+    args.output = config['output']['base_dir']
+    args.savefile = config['output']['save_dir']
+
+    train(config, args)
