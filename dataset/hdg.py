@@ -11,26 +11,29 @@ from albumentations.pytorch import ToTensorV2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-def calculate_mean_std(image_paths, img_size):
+def calculate_mean_std(image_paths, img_size, is_main_process):
     """
     遍历所有训练图像，计算单通道的均值和标准差。
     
     Args:
         image_paths (list): 训练图像的路径列表。
         img_size (int): 图像的目标尺寸。
+        is_main_process (bool): 是否为主进程 (rank 0)。
         
     Returns:
         tuple: (mean, std)
     """
-    print("正在计算训练数据集的均值和标准差...")
+    if is_main_process:
+        print("正在计算训练数据集的均值和标准差...")
+    
     total_pixels = 0
     sum_pixels = 0.0
     sum_sq_pixels = 0.0
 
-    for path in tqdm(image_paths, desc="正在计算统计数据"):
-        # 以单通道（灰度）模式打开图像
+    # 仅在主进程显示tqdm进度条
+    iterator = tqdm(image_paths, desc="正在计算统计数据", disable=not is_main_process)
+    for path in iterator:
         img = Image.open(path).convert('L')
-        # 调整尺寸以匹配训练输入
         img = img.resize((img_size, img_size), Image.Resampling.BILINEAR)
         img_np = np.array(img, dtype=np.float64) / 255.0
 
@@ -41,33 +44,30 @@ def calculate_mean_std(image_paths, img_size):
     mean = sum_pixels / total_pixels
     std = np.sqrt(sum_sq_pixels / total_pixels - np.square(mean))
 
-    print("计算完成。")
-    print(f"计算出的均值 (Mean): {mean:.4f}")
-    print(f"计算出的标准差 (Std): {std:.4f}")
+    if is_main_process:
+        print("计算完成。")
+        print(f"计算出的均值 (Mean): {mean:.4f}")
+        print(f"计算出的标准差 (Std): {std:.4f}")
+        
     return mean, std
 
-
 class HydrogelDataset(Dataset):
-    """
-    用于水凝胶图像分割的数据集类。
-    自动匹配 'revised-hydrogel' 中的原图和 'masks-hydrogel' 中的蒙版。
-    """
+    """用于水凝胶图像分割的数据集类。"""
     def __init__(self, image_paths, mask_dir, transform=None):
         self.image_paths = image_paths
         self.mask_dir = mask_dir
         self.transform = transform
+        self.mean = 0
+        self.std = 1
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
-        # 以单通道（灰度）模式加载图像
         image = np.array(Image.open(img_path).convert("L"))
-
         mask_path = img_path.replace('revised-hydrogel', os.path.basename(self.mask_dir))
         mask = np.array(Image.open(mask_path).convert("L"), dtype=np.float32)
-        
         mask[mask == 255.0] = 1.0
 
         if self.transform:
@@ -86,24 +86,12 @@ def get_transforms(img_size, mean, std, is_train=True):
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
-            A.OneOf([
-                A.ElasticTransform(p=0.3),
-                A.GridDistortion(p=0.3),
-                A.OpticalDistortion(p=0.3)
-            ], p=0.3),
-            A.OneOf([
-                A.RandomBrightnessContrast(p=0.5),
-                A.RandomGamma(p=0.5),
-            ], p=0.5),
-            # 使用计算出的单通道均值和标准差进行归一化
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
         ])
     else:
         return A.Compose([
             A.Resize(img_size, img_size),
-            # 对验证集也使用相同的均值和标准差
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
         ])
