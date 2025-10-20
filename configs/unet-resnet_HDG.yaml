@@ -24,7 +24,7 @@ training:
   # Minimum learning rate for cosine annealing
   eta_min: 0.000001
 
-  num_epochs: 300
+  num_epochs: 30000
   # Batch size per GPU
   batch_size: 2
   # Accumulate gradients over N steps before updating weights
