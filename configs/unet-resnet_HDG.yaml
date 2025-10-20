@@ -26,9 +26,9 @@ training:
 
   num_epochs: 100
   # Batch size per GPU
-  batch_size: 4
+  batch_size: 2
   # Accumulate gradients over N steps before updating weights
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 1
 
   # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
   use_compile: False
