@@ -25,6 +25,7 @@ class DiceBCELoss(nn.Module):
         # 将张量展平以便计算
         probs = probs.view(-1)
         targets = targets.view(-1)
+        print(f"probs:{probs.mean()}, targets:{targets.mean()}")
         
         # --- 1. BCE Loss component ---
         # 直接在logits上使用BCEWithLogitsLoss以保证数值稳定性
