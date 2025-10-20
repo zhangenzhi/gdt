@@ -135,7 +135,7 @@ if __name__ == '__main__':
         
         try:
             # 1. 创建模型并移至GPU
-            model_8k = create_unet_model(backbone_name='resnet34', pretrained=False, in_chans=1)
+            model_8k = create_unet_model(backbone_name='resnet18', pretrained=False, in_chans=1)
             model_8k.to(device)
             print(f"成功创建模型: {model_8k.__class__.__name__} with ResNet34 backbone")
 
@@ -192,7 +192,7 @@ if __name__ == '__main__':
 
         try:
             # 1. 直接复用之前在GPU上的8k模型
-            print(f"复用模型: {model_8k.__class__.__name__} with ResNet34 backbone")
+            print(f"复用模型: {model_8k.__class__.__name__} with ResNet18 backbone")
 
             # 2. 创建一个32k的虚拟输入和目标图像
             dummy_input_32k = torch.randn(1, 1, 32768, 32768, device=device, dtype=torch.bfloat16)
