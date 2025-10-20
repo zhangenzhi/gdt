@@ -7,7 +7,7 @@ task_name: "unet_resnet18_1k_run"
 model:
   # You can choose from 'resnet18', 'resnet34', 'resnet50', etc.
   backbone_name: 'resnet18'
-  pretrained: True
+  pretrained: False
   in_chans: 1
   num_classes: 1
   # The size the images will be resized to
