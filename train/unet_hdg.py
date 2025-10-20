@@ -150,7 +150,7 @@ def train(config, args):
         data_dir=args.data_dir,
         img_size=config['model']['img_size'],
         batch_size=config['training']['batch_size'],
-        num_workers=config['training']['num_workers'],
+        num_workers=config['data']['num_workers'],
         use_ddp=True
     )
     # 将计算出的mean和std附加到val_loader.dataset以供可视化使用
