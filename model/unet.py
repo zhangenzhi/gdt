@@ -121,21 +121,57 @@ if __name__ == '__main__':
     assert dummy_input_1k.shape[2:] == output_1k.shape[2:], "1k 输出尺寸与输入尺寸不匹配!"
     print("1k 模型结构验证成功。\n")
 
-    print("--- 针对8k图像，测试创建基于ResNet34的U-Net ---")
-    model_8k = create_unet_model(backbone_name='resnet34', pretrained=False, in_chans=1)
-    print(f"成功创建模型: {model_8k.__class__.__name__} with ResNet34 backbone")
-    
-    # 注意: 8k输入非常大，这里仅用于结构验证。
-    # 实际训练时，请确保有足够的GPU显存（如 H100 80GB）。
-    dummy_input_8k = torch.randn(1, 1, 8192, 8192) 
-    print(f"8k 输入尺寸: {dummy_input_8k.shape}")
-    
-    try:
-        # 在GPU上运行时，此操作应能成功。在CPU上可能会因内存不足而出错。
-        # output_8k = model_8k(dummy_input_8k)
-        # print(f"8k 输出尺寸: {output_8k.shape}")
-        # assert dummy_input_8k.shape[2:] == output_8k.shape[2:], "8k 输出尺寸与输入尺寸不匹配!"
-        print("8k 模型结构验证成功 (跳过前向传播测试以节省本地内存)。")
-    except Exception as e:
-        print(f"在测试8k输入时遇到错误 (这在CPU上可能是正常的内存问题): {e}")
-        print("尽管出现内存错误，但模型结构本身支持任意尺寸输入。")
+    print("--- 针对8k图像，测试创建基于ResNet34的U-Net (包括前向和反向传播) ---")
+    if not torch.cuda.is_available():
+        print("未检测到CUDA GPU，跳过8k显存占用测试。")
+    else:
+        device = torch.device("cuda")
+        print(f"检测到GPU: {torch.cuda.get_device_name(0)}")
+        
+        try:
+            # 1. 创建模型并移至GPU
+            model_8k = create_unet_model(backbone_name='resnet34', pretrained=False, in_chans=1)
+            model_8k.to(device)
+            print(f"成功创建模型: {model_8k.__class__.__name__} with ResNet34 backbone")
+
+            # 2. 创建输入和目标张量
+            # 使用bfloat16以模拟训练环境，节省显存
+            dummy_input_8k = torch.randn(1, 1, 8192, 8192, device=device, dtype=torch.bfloat16)
+            dummy_target_8k = torch.rand(1, 1, 8192, 8192, device=device, dtype=torch.bfloat16)
+            print(f"8k 输入尺寸: {dummy_input_8k.shape}")
+            
+            # 3. 验证前向传播
+            print("正在执行前向传播...")
+            torch.cuda.reset_peak_memory_stats(device)
+            initial_mem = torch.cuda.memory_allocated(device) / 1024**3
+            
+            # 使用amp.autocast模拟混合精度训练
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                output_8k = model_8k(dummy_input_8k)
+                loss = F.mse_loss(output_8k, dummy_target_8k) # 使用简单的损失函数进行测试
+
+            forward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print(f"前向传播完成。输出尺寸: {output_8k.shape}")
+            assert dummy_input_8k.shape[2:] == output_8k.shape[2:], "8k 输出尺寸与输入尺寸不匹配!"
+            print(f"初始显存占用: {initial_mem:.2f} GB")
+            print(f"前向传播峰值显存占用: {forward_mem:.2f} GB")
+
+            # 4. 验证反向传播
+            print("正在执行反向传播...")
+            # GradScaler是可选的，但为了完整性我们加上
+            scaler = torch.cuda.amp.GradScaler()
+            scaler.scale(loss).backward()
+            
+            backward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print("反向传播完成。")
+            print(f"前向+反向传播峰值显存占用: {backward_mem:.2f} GB")
+            print("\n8k 模型结构和显存占用验证成功。")
+
+        except torch.cuda.OutOfMemoryError:
+            print("\n错误: 发生CUDA显存不足错误!")
+            peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            print(f"峰值显存占用达到 {peak_mem:.2f} GB 时发生错误。")
+            print("请考虑使用更轻量的backbone，减小图像尺寸，或使用梯度累积等技术。")
+        except Exception as e:
+            print(f"\n在测试8k输入时遇到意外错误: {e}")
+
