@@ -2,42 +2,42 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DiceLoss(nn.Module):
-    """计算Dice损失，用于图像分割"""
-    def __init__(self, smooth=1e-6):
-        super(DiceLoss, self).__init__()
-        self.smooth = smooth
+class DiceBCELoss(nn.Module):
+    """
+    一个结合了Dice Loss和二元交叉熵（BCE）的复合损失函数。
+    这种组合通常比单独使用任何一种都更稳定和有效。
+    """
+    def __init__(self, weight=None, size_average=True):
+        super(DiceBCELoss, self).__init__()
 
-    def forward(self, logits, targets):
-        # 使用sigmoid将logits转换为概率
+    def forward(self, logits, targets, smooth=1e-6):
+        """
+        Args:
+            logits (torch.Tensor): 模型的原始输出 (在激活函数之前)。
+            targets (torch.Tensor): 真实标签 (0或1)。
+        
+        Returns:
+            torch.Tensor: 计算出的总损失。
+        """
+        # 使用sigmoid将logits转换为[0, 1]范围内的概率
         probs = torch.sigmoid(logits)
         
-        # 展平logits和targets
+        # 将张量展平以便计算
         probs = probs.view(-1)
         targets = targets.view(-1)
         
-        intersection = (probs * targets).sum()
-        dice_coeff = (2. * intersection + self.smooth) / (probs.sum() + targets.sum() + self.smooth)
+        # --- 1. BCE Loss component ---
+        # 直接在logits上使用BCEWithLogitsLoss以保证数值稳定性
+        bce_loss = F.binary_cross_entropy_with_logits(logits.view(-1), targets, reduction='mean')
         
-        return 1 - dice_coeff
-
-class DiceBCELoss(nn.Module):
-    """
-    将Dice损失和二元交叉熵损失（BCE）结合。
-    这在分割任务中是一种非常常见且有效的损失函数。
-    """
-    def __init__(self, dice_weight=0.5, bce_weight=0.5, smooth=1e-6):
-        super(DiceBCELoss, self).__init__()
-        self.dice_loss = DiceLoss(smooth=smooth)
-        self.bce_loss = nn.BCEWithLogitsLoss()
-        self.dice_weight = dice_weight
-        self.bce_weight = bce_weight
-
-    def forward(self, logits, targets):
-        dice_loss = self.dice_loss(logits, targets)
-        bce_loss = self.bce_loss(logits, targets)
+        # --- 2. Dice Loss component ---
+        intersection = (probs * targets).sum()                            
+        dice_coeff = (2. * intersection + smooth) / (probs.sum() + targets.sum() + smooth)
         
-        # 加权组合两种损失
-        total_loss = (self.dice_weight * dice_loss) + (self.bce_weight * bce_loss)
+        # Dice Loss的正确形式是 1 - Dice系数
+        # 它的值域是 [0, 1]，永远不会是负数。
+        dice_loss = 1 - dice_coeff
         
-        return total_loss
+        # 最终损失是两者的和
+        loss = bce_loss + dice_loss
+        return loss
