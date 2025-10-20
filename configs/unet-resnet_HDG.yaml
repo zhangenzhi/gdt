@@ -22,7 +22,7 @@ training:
   weight_decay: 0.05
   warmup_epochs: 5
   # Minimum learning rate for cosine annealing
-  eta_min: 0.000001
+  eta_min: 0.0001
 
   num_epochs: 30000
   # Batch size per GPU
