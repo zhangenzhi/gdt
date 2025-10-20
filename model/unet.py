@@ -105,7 +105,7 @@ def create_unet_model(encoder_name='efficientnet_b4', pretrained=True, in_chans=
 if __name__ == '__main__':
     # 测试创建单通道模型
     # 注意：现在我们传入的是编码器的名称
-    model_1_chan = create_unet_model(encoder_name='efficientnet_b4', in_chans=1)
+    model_1_chan = create_unet_model(encoder_name='efficientnet_b4', pretrained=False, in_chans=1)
     print(f"成功创建基于timm encoder的U-Net模型: {model_1_chan.__class__.__name__}")
     
     dummy_input = torch.randn(2, 1, 1024, 1024)
