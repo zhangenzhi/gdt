@@ -148,34 +148,32 @@ if __name__ == '__main__':
             # 3. 验证前向传播
             print("正在执行前向传播...")
             torch.cuda.reset_peak_memory_stats(device)
-            initial_mem = torch.cuda.memory_allocated(device) / 1024**3
+            initial_mem_reserved = torch.cuda.memory_reserved(device) / 1024**3
             
-            # 使用amp.autocast模拟混合精度训练
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            # 使用 torch.amp.autocast (新版API)
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output_8k = model_8k(dummy_input_8k)
-                loss = F.mse_loss(output_8k, dummy_target_8k) # 使用简单的损失函数进行测试
+                loss = F.mse_loss(output_8k, dummy_target_8k)
 
-            forward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            forward_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
             print(f"前向传播完成。输出尺寸: {output_8k.shape}")
             assert dummy_input_8k.shape[2:] == output_8k.shape[2:], "8k 输出尺寸与输入尺寸不匹配!"
-            print(f"初始显存占用: {initial_mem:.2f} GB")
-            print(f"前向传播峰值显存占用: {forward_mem:.2f} GB")
+            print(f"初始预留显存 (Initial Reserved): {initial_mem_reserved:.2f} GB")
+            print(f"前向传播峰值预留显存 (Forward Peak Reserved): {forward_mem_reserved:.2f} GB")
 
             # 4. 验证反向传播
             print("正在执行反向传播...")
-            # GradScaler是可选的，但为了完整性我们加上
-            scaler = torch.cuda.amp.GradScaler()
-            scaler.scale(loss).backward()
+            loss.backward()
             
-            backward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            backward_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
             print("反向传播完成。")
-            print(f"前向+反向传播峰值显存占用: {backward_mem:.2f} GB")
+            print(f"前向+反向传播峰值预留显存 (Total Peak Reserved): {backward_mem_reserved:.2f} GB")
             print("\n8k 模型结构和显存占用验证成功。\n")
 
         except torch.cuda.OutOfMemoryError:
             print("\n错误: 发生CUDA显存不足错误!")
-            peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3
-            print(f"峰值显存占用达到 {peak_mem:.2f} GB 时发生错误。")
+            peak_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
+            print(f"峰值预留显存达到 {peak_mem_reserved:.2f} GB 时发生错误。")
             print("请考虑使用更轻量的backbone，减小图像尺寸，或使用梯度累积等技术。\n")
         except Exception as e:
             print(f"\n在测试8k输入时遇到意外错误: {e}\n")
@@ -210,7 +208,7 @@ if __name__ == '__main__':
             print("正在处理8k图像 (前向传播)...")
             torch.cuda.reset_peak_memory_stats(device)
             
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output_from_downsampled = model_8k(downsampled_input_8k)
                 
                 # 5. 将8k的输出上采样回32k
@@ -219,24 +217,24 @@ if __name__ == '__main__':
                 # 6. 在完整的32k尺度上计算损失
                 loss = F.mse_loss(final_output_32k, dummy_target_32k)
 
-            forward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            forward_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
             print(f"前向传播完成。最终32k输出尺寸: {final_output_32k.shape}")
             assert dummy_input_32k.shape[2:] == final_output_32k.shape[2:], "32k最终输出尺寸与原始输入尺寸不匹配!"
-            print(f"32k方案前向传播峰值显存: {forward_mem:.2f} GB")
+            print(f"32k方案前向传播峰值预留显存: {forward_mem_reserved:.2f} GB")
 
             # 7. 执行后向传播计算梯度
             print("正在执行后向传播...")
             loss.backward()
             
-            backward_mem = torch.cuda.max_memory_allocated(device) / 1024**3
+            backward_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
             print("后向传播完成。")
-            print(f"32k方案前向+后向传播峰值显存: {backward_mem:.2f} GB")
+            print(f"32k方案前向+后向传播峰值预留显存: {backward_mem_reserved:.2f} GB")
             print("\n32k下采样方案及梯度计算验证成功!")
 
         except torch.cuda.OutOfMemoryError:
             print("\n错误: 即使在处理下采样后的8k图像时也发生了CUDA显存不足错误!")
-            peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3
-            print(f"峰值显存占用达到 {peak_mem:.2f} GB 时发生错误。")
+            peak_mem_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
+            print(f"峰值预留显存达到 {peak_mem_reserved:.2f} GB 时发生错误。")
         except Exception as e:
             print(f"\n在测试32k下采样方案时遇到意外错误: {e}")
 
