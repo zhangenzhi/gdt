@@ -14,7 +14,7 @@ from torch import nn
 import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast 
 
 # --- 导入我们自己的模块 ---
 from model.unet import create_unet_model
