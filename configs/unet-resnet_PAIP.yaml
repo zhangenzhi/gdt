@@ -11,7 +11,7 @@ model:
   in_chans: 1
   num_classes: 1
   # The size the images will be resized to
-  img_size: 1024
+  img_size: 32768
 
 # 2. Training Hyperparameters
 training:
@@ -26,7 +26,7 @@ training:
 
   num_epochs: 30000
   # Batch size per GPU
-  batch_size: 2
+  batch_size: 1
   # Accumulate gradients over N steps before updating weights
   gradient_accumulation_steps: 1
 
@@ -36,6 +36,6 @@ training:
 # 3. Data Configuration
 data:
   # Root directory path of the dataset (can be overridden by command line)
-  data_dir: '/work/c30636/dataset/hydrogel-s'
+  data_dir: '/work/c30636/dataset/paip'
   # Number of worker processes for DataLoader
   num_workers: 8
