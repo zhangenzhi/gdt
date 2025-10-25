@@ -211,7 +211,9 @@ class Rect:
 # --- Example Usage ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hierarchical HDE Visualization Demo')
-    parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
     args = parser.parse_args()
             
     # --- Start of Demo ---
