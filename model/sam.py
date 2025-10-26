@@ -98,32 +98,38 @@ class Attention(nn.Module):
             use_rel_pos: bool = False,
             input_size: Optional[Tuple[int, int]] = None,
             rope: Optional[nn.Module] = None,
-            device=None,
+            device=None, # 保留以允许传递，但仅用于nn.Parameter
             dtype=None,
     ):
-        dd = {'device': device, 'dtype': dtype}
         super().__init__()
+        # 用于nn.Parameter的参数字典
+        param_dd = {'device': device, 'dtype': dtype}
+        # 用于不支持device/dtype的层的参数字典
+        layer_dd = {} # 通常为空
+
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
         self.fused_attn = use_fused_attn()
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias, **dd)
-        self.q_norm = norm_layer(self.head_dim, **dd) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer(self.head_dim, **dd) if qk_norm else nn.Identity()
+        # 标准层不支持 device/dtype
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias, **layer_dd)
+        self.q_norm = norm_layer(self.head_dim, **layer_dd) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim, **layer_dd) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim, **dd)
+        self.proj = nn.Linear(dim, dim, **layer_dd)
         self.proj_drop = nn.Dropout(proj_drop)
+
         self.use_rel_pos = use_rel_pos
         if self.use_rel_pos:
             assert rope is None
             assert (
                     input_size is not None
             ), "Input size must be provided if using relative positional encoding."
-            # initialize relative positional embeddings
-            self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, self.head_dim, **dd))
-            self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, self.head_dim, **dd))
+            # nn.Parameter 支持 device/dtype
+            self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, self.head_dim, **param_dd))
+            self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, self.head_dim, **param_dd))
         self.rope = rope
 
     def forward(self, x):
@@ -208,13 +214,18 @@ class Block(nn.Module):
             window_size: int = 0,
             input_size=None,
             rope=None,
-            device=None,
+            device=None, # 保留以允许传递，但仅用于nn.Parameter
             dtype=None,
     ):
-        dd = {'device': device, 'dtype': dtype}
         super().__init__()
+        # 用于nn.Parameter的参数字典
+        param_dd = {'device': device, 'dtype': dtype}
+        # 用于不支持device/dtype的层的参数字典
+        layer_dd = {} # 通常为空
+
         self.window_size = window_size
-        self.norm1 = norm_layer(dim, **dd)
+        self.norm1 = norm_layer(dim, **layer_dd)
+        # 注意：Attention内部已经处理了哪些层接收dd
         self.attn = Attention(
             dim,
             num_heads=num_heads,
@@ -226,27 +237,28 @@ class Block(nn.Module):
             use_rel_pos=use_rel_pos,
             input_size=input_size if window_size == 0 else (window_size, window_size),
             rope=rope,
-            **dd,
+            device=device, # 传递给Attention，它会内部处理
+            dtype=dtype,
         )
-        self.ls1 = LayerScale(dim, init_values=init_values, **dd) if init_values else nn.Identity()
+        self.ls1 = LayerScale(dim, init_values=init_values, **layer_dd) if init_values else nn.Identity()
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-        self.norm2 = norm_layer(dim, **dd)
+        self.norm2 = norm_layer(dim, **layer_dd)
         self.mlp = mlp_layer(
             in_features=dim,
             hidden_features=int(dim * mlp_ratio),
             act_layer=act_layer,
             drop=proj_drop,
-            **dd,
+            # **layer_dd, # <-- 修正：Mlp不支持device/dtype
         )
-        self.ls2 = LayerScale(dim, init_values=init_values, **dd) if init_values else nn.Identity()
+        self.ls2 = LayerScale(dim, init_values=init_values, **layer_dd) if init_values else nn.Identity()
         self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
     def forward(self, x):
         B, H, W, _ = x.shape
         shortcut = x
         x = self.norm1(x)
-        
+
         pad_hw: Optional[Tuple[int, int]] = None
         if self.window_size > 0:
             x, pad_hw = window_partition(x, self.window_size)
@@ -257,14 +269,14 @@ class Block(nn.Module):
             x = window_unpartition(x, self.window_size, (H, W), pad_hw)
 
         x = shortcut + x
-        
+
         # MLP is faster for N, L, C tensor
         shortcut = x
         x = self.norm2(x)
         x = self.mlp(x)
         x = self.drop_path2(self.ls2(x))
         x = shortcut + x
-        
+
         return x
 
 
@@ -299,11 +311,15 @@ class VisionTransformerSAM(nn.Module):
             window_size: int = 14,
             global_attn_indexes: Tuple[int, ...] = (),
             neck_chans: int = 256,
-            device=None,
+            device=None, # 保留以允许传递，但仅用于nn.Parameter
             dtype=None,
     ):
         super().__init__()
-        dd = {'device': device, 'dtype': dtype}
+        # 用于nn.Parameter的参数字典
+        param_dd = {'device': device, 'dtype': dtype}
+        # 用于不支持device/dtype的层的参数字典
+        layer_dd = {} # 通常为空
+
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
 
@@ -317,23 +333,23 @@ class VisionTransformerSAM(nn.Module):
             in_chans=in_chans,
             embed_dim=embed_dim,
             bias=not pre_norm,
-            # **dd,  # <-- 修正：PatchEmbed不支持device/dtype参数
         )
         grid_size = self.patch_embed.grid_size
 
         if use_abs_pos:
             # SAM uses a 64x64 pos embedding, which is resampled dynamically.
-            # We initialize with this target grid size.
-            self.pos_embed = nn.Parameter(torch.zeros(1, 64, 64, embed_dim, **dd))
+            # nn.Parameter 支持 device/dtype
+            self.pos_embed = nn.Parameter(torch.zeros(1, 64, 64, embed_dim, **param_dd))
         else:
             self.pos_embed = None
         self.pos_drop = nn.Dropout(p=pos_drop_rate)
-        
+
         # This is always False for SAM
-        self.norm_pre = norm_layer(embed_dim, **dd) if pre_norm else nn.Identity()
+        self.norm_pre = norm_layer(embed_dim, **layer_dd) if pre_norm else nn.Identity()
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         self.blocks = nn.Sequential(*[
+            # Block内部已经处理了哪些层接收dd
             block_fn(
                 dim=embed_dim,
                 num_heads=num_heads,
@@ -351,7 +367,8 @@ class VisionTransformerSAM(nn.Module):
                 window_size=window_size if i not in global_attn_indexes else 0,
                 input_size=grid_size,
                 rope=None, # ROPE is not used in SAM-B
-                **dd,
+                device=device, # 传递给Block，它会内部处理
+                dtype=dtype,
             )
             for i in range(depth)])
 
@@ -362,18 +379,18 @@ class VisionTransformerSAM(nn.Module):
                 neck_chans,
                 kernel_size=1,
                 bias=False,
-                **dd,
+                **layer_dd,
             ),
-            LayerNorm2d(neck_chans, **dd),
+            LayerNorm2d(neck_chans, **layer_dd),
             nn.Conv2d(
                 neck_chans,
                 neck_chans,
                 kernel_size=3,
                 padding=1,
                 bias=False,
-                **dd,
+                **layer_dd,
             ),
-            LayerNorm2d(neck_chans, **dd),
+            LayerNorm2d(neck_chans, **layer_dd),
         )
 
     def forward_features(self, x):
@@ -383,10 +400,10 @@ class VisionTransformerSAM(nn.Module):
             x = x + resample_abs_pos_embed_nhwc(self.pos_embed, x.shape[1:3])
         x = self.pos_drop(x)
         x = self.norm_pre(x)
-        
+
         # x shape is (B, H_grid, W_grid, C_embed)
         x = self.blocks(x)
-        
+
         # x shape is (B, H_grid, W_grid, C_embed), permute to (B, C_embed, H_grid, W_grid) for Neck
         x = self.neck(x.permute(0, 3, 1, 2))
         # x shape is (B, C_neck, H_grid, W_grid)
