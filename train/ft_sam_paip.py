@@ -19,7 +19,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import GradScaler, autocast 
 
 sys.path.append("./")
-from model.timm_sam import SAMLikeModel
+from model.sam import SAMLikeModel
 from dataset.s8d import build_s8d_segmentation_dataloaders
 
 def setup_logging(args):
