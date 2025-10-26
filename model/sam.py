@@ -1,5 +1,5 @@
 """
-SAM-B (ViT-Base) 模型工厂，支持动态调整Patch Size以适应超高分辨率输入。
+SAM-B (ViT-Base) 模型工厂，支持动态调整Patch Size以适应超高分辨率输入，并包含分割解码器。
 """
 import logging
 from functools import partial
@@ -280,13 +280,54 @@ class Block(nn.Module):
         return x
 
 
+# --- *** 新增：分割解码器 *** ---
+class SimpleSegmentationDecoder(nn.Module):
+    def __init__(self, in_channels=256, out_channels=1, upsample_factor=16):
+        """
+        一个简单的分割解码器，用于将ViT特征图上采样到原始分辨率。
+        
+        Args:
+            in_channels (int): 输入特征图的通道数 (来自ViT neck)。
+            out_channels (int): 输出分割图的通道数 (例如，1用于二元分割)。
+            upsample_factor (int): 从特征图到原始图像尺寸的总上采样倍数。
+                                   对于patch_size=16的ViT，通常是16。
+                                   (img_size / patch_size) / (grid_size) = (1024/16)/64 = 1? 不对
+                                   特征图尺寸是 H/patch_size, W/patch_size。所以需要上采样 patch_size 倍。
+        """
+        super().__init__()
+        # 计算需要多少个2倍上采样层
+        num_upsample_layers = int(torch.log2(torch.tensor(float(upsample_factor))).item())
+        
+        layers = []
+        current_channels = in_channels
+        for i in range(num_upsample_layers):
+            out_ch = current_channels // 2 if i < num_upsample_layers - 1 else current_channels // 4
+            if out_ch < 16: # 确保通道数不会太小
+                out_ch = 16
+
+            layers.append(
+                nn.ConvTranspose2d(current_channels, out_ch, kernel_size=2, stride=2)
+            )
+            layers.append(nn.ReLU(inplace=True))
+            current_channels = out_ch
+            
+        # 最后的1x1卷积，将通道数降为目标输出通道数
+        layers.append(nn.Conv2d(current_channels, out_channels, kernel_size=1))
+        
+        self.decoder = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x shape: [B, C_neck, H_grid, W_grid]
+        return self.decoder(x)
+
+# --- *** 修改后的 VisionTransformerSAM *** ---
 class VisionTransformerSAM(nn.Module):
     def __init__(
             self,
             img_size: int = 1024,
             patch_size: int = 16,
             in_chans: int = 3,
-            num_classes: int = 0, # SAM-B has no classification head by default
+            num_classes: int = 1, # 修改：现在控制解码器输出通道
             embed_dim: int = 768,
             depth: int = 12,
             num_heads: int = 12,
@@ -323,7 +364,7 @@ class VisionTransformerSAM(nn.Module):
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
 
-        self.num_classes = num_classes
+        self.num_classes = num_classes # 现在是分割类别数
         self.embed_dim = embed_dim
         self.grad_checkpointing = False
 
@@ -393,6 +434,15 @@ class VisionTransformerSAM(nn.Module):
             LayerNorm2d(neck_chans, **layer_dd),
         )
 
+        # --- *** 新增：添加解码器 *** ---
+        # patch_size 就是总的下采样倍数
+        self.decoder = SimpleSegmentationDecoder(
+            in_channels=neck_chans,
+            out_channels=num_classes,
+            upsample_factor=patch_size
+        )
+
+
     def forward_features(self, x):
         x = self.patch_embed(x)
         if self.pos_embed is not None:
@@ -410,7 +460,17 @@ class VisionTransformerSAM(nn.Module):
         return x
 
     def forward(self, x):
-        return self.forward_features(x)
+        # --- *** 修改：通过解码器生成分割图 *** ---
+        features = self.forward_features(x)
+        segmentation_logits = self.decoder(features)
+        # 确保输出尺寸与输入完全一致
+        segmentation_logits = F.interpolate(
+            segmentation_logits,
+            size=x.shape[2:],
+            mode='bilinear',
+            align_corners=False
+        )
+        return segmentation_logits # 返回logits [B, num_classes, H, W]
 
 
 # --- Checkpoint Loading Helpers (来自您的timm代码) ---
@@ -422,15 +482,31 @@ def checkpoint_filter_fn(
     """ Remap SAM checkpoints -> timm """
     sam_checkpoint = 'image_encoder.patch_embed.proj.weight' in state_dict
     out_dict = {}
+    is_segmentation_model = hasattr(model, 'decoder') # 检查是否有decoder
+
     for k, v in state_dict.items():
         if k.startswith('image_encoder.'):
             k = k[14:]
             k = k.replace('mlp.lin', 'mlp.fc')
-        else:
-            if sam_checkpoint:
+
+            # 如果是分割模型，跳过原始checkpoint中的neck和head层
+            if is_segmentation_model and (k.startswith('neck.') or k.startswith('head.')):
+                 _logger.debug(f"Skipping loading key '{k}' for segmentation model.")
+                 continue
+
+        elif sam_checkpoint: # 如果是原始SAM checkpoint，跳过非encoder部分
+             # 允许加载neck层，如果目标模型也有neck层
+            if not k.startswith('neck.') or not hasattr(model, 'neck'):
                 continue
+            # 跳过原始SAM的head层（如果有的话）
+            if k.startswith('head.'):
+                continue
+
+        # 将过滤后的键值对添加到新字典
         out_dict[k] = v
+
     return out_dict
+
 
 def _cfg(url='', **kwargs):
     return {
@@ -456,17 +532,20 @@ def create_sam_b_variant(
     img_size: int,
     in_chans: int = 3,
     target_patch_grid_size: int = 64,
-    pretrained: bool = True
+    pretrained: bool = True,
+    num_classes: int = 1 # 添加参数以控制分割输出通道
 ) -> VisionTransformerSAM:
     """
     创建一个SAM-B（ViT-Base）变体模型，自动调整patch_size以匹配目标网格大小。
+    包含一个简单的分割解码器。
     
     Args:
         img_size (int): 您的输入图像尺寸 (e.g., 1024, 8192, 32768).
         in_chans (int): 输入通道数 (e.g., 1 for grayscale, 3 for RGB).
         target_patch_grid_size (int): 您希望Transformer处理的目标序列长度。
                                      64x64是SAM-B的标准配置。
-        pretrained (bool): 是否加载预训练权重。
+        pretrained (bool): 是否加载预训练的SAM编码器权重。
+        num_classes (int): 分割输出的通道数 (e.g., 1 for binary segmentation)。
                            
     Returns:
         VisionTransformerSAM: 一个配置好并可选择性加载了权重的模型。
@@ -481,8 +560,8 @@ def create_sam_b_variant(
         )
 
     _logger.info(
-        f"创建SAM-B变体: img_size={img_size}, target_grid={target_patch_grid_size}x{target_patch_grid_size} "
-        f"-> 计算出的 patch_size={new_patch_size}x{new_patch_size}"
+        f"创建SAM-B分割变体: img_size={img_size}, target_grid={target_patch_grid_size}x{target_patch_grid_size} "
+        f"-> 计算出的 patch_size={new_patch_size}x{new_patch_size}, 输出通道={num_classes}"
     )
 
     # 2. 定义SAM-B的架构参数
@@ -497,7 +576,7 @@ def create_sam_b_variant(
         img_size=img_size,
         in_chans=in_chans,
         neck_chans=256,
-        num_classes=0, # SAM是一个编码器，没有分类头
+        num_classes=num_classes, # 传递给模型以设置解码器输出
     )
 
     # 3. 从头创建模型
@@ -505,69 +584,72 @@ def create_sam_b_variant(
     
     # 4. 如果需要，加载并调整预训练权重
     if pretrained:
-        _logger.info("正在加载预训练的SAM-B (sam_vit_b_01ec64.pth) 权重...")
+        _logger.info("正在加载预训练的SAM-B (sam_vit_b_01ec64.pth) 编码器权重...")
         cfg = default_cfgs['samvit_base_patch16.sa1b']
         
         # 从URL加载原始的状态字典
         state_dict = load_state_dict_from_url(cfg['url'], map_location='cpu')
         
-        # 过滤掉不需要的键 (例如解码器)
-        state_dict = checkpoint_filter_fn(state_dict, model)
+        # 过滤掉不需要的键 (主要是原始SAM的解码器部分，如果存在的话)
+        # 注意：我们的filter函数现在会保留neck层权重
+        filtered_state_dict = checkpoint_filter_fn(state_dict, model)
 
         # --- **核心逻辑: 调整Patch Embedding权重** ---
         orig_patch_embed_key = 'patch_embed.proj.weight'
-        orig_patch_embed_weights = state_dict[orig_patch_embed_key]
-        orig_patch_size = 16 # SAM-B的原始patch size
-        
-        if new_patch_size != orig_patch_size:
-            _logger.warning(
-                f"Patch size (new={new_patch_size}) 与 "
-                f"checkpoint (old={orig_patch_size}) 不匹配。"
-                f"正在使用双三次插值调整 patch_embed 权重。"
-            )
-            # 使用F.interpolate来调整卷积核的权重
-            # (B, C, H, W) -> (C, B, H, W) -> (embed_dim, in_chans, H_patch, W_patch)
-            new_patch_embed_weights = F.interpolate(
-                orig_patch_embed_weights,
-                size=(new_patch_size, new_patch_size),
-                mode='bicubic',
-                align_corners=False,
-            )
-            state_dict[orig_patch_embed_key] = new_patch_embed_weights
-        
-        # 调整输入通道数 (如果需要)
-        if in_chans != 3:
-            _logger.warning(
-                f"Input channels (new={in_chans}) 与 "
-                f"checkpoint (old=3) 不匹配。"
-                f"将对 patch_embed 权重的输入通道取平均值。"
-            )
-            # (embed_dim, 3, H_patch, W_patch) -> (embed_dim, 1, H_patch, W_patch)
-            # 我们取3个通道的平均值
-            new_weights = state_dict[orig_patch_embed_key].mean(dim=1, keepdim=True)
-            if in_chans > 1:
-                # 如果需要多个输入通道, 就复制这个平均后的通道
-                new_weights = new_weights.repeat(1, in_chans, 1, 1)
-            state_dict[orig_patch_embed_key] = new_weights
+        # 检查过滤后的字典中是否还有这个键
+        if orig_patch_embed_key in filtered_state_dict:
+            orig_patch_embed_weights = filtered_state_dict[orig_patch_embed_key]
+            orig_patch_size = 16 # SAM-B的原始patch size
+            
+            if new_patch_size != orig_patch_size:
+                _logger.warning(
+                    f"Patch size (new={new_patch_size}) 与 "
+                    f"checkpoint (old={orig_patch_size}) 不匹配。"
+                    f"正在使用双三次插值调整 patch_embed 权重。"
+                )
+                new_patch_embed_weights = F.interpolate(
+                    orig_patch_embed_weights,
+                    size=(new_patch_size, new_patch_size),
+                    mode='bicubic',
+                    align_corners=False,
+                )
+                filtered_state_dict[orig_patch_embed_key] = new_patch_embed_weights
+            
+            # 调整输入通道数 (如果需要)
+            if in_chans != 3:
+                _logger.warning(
+                    f"Input channels (new={in_chans}) 与 "
+                    f"checkpoint (old=3) 不匹配。"
+                    f"将对 patch_embed 权重的输入通道取平均值。"
+                )
+                new_weights = filtered_state_dict[orig_patch_embed_key].mean(dim=1, keepdim=True)
+                if in_chans > 1:
+                    new_weights = new_weights.repeat(1, in_chans, 1, 1)
+                filtered_state_dict[orig_patch_embed_key] = new_weights
+        else:
+            _logger.warning(f"无法在预训练权重中找到 '{orig_patch_embed_key}'。跳过Patch Embedding调整。")
+
 
         # 加载位置编码 (Positional Embedding)
-        # 原始 pos_embed 尺寸为 [1, 64, 64, 768]
-        # 我们的模型 pos_embed 尺寸也为 [1, 64, 64, 768] (因为 target_patch_grid_size=64)
-        # 它们会完美匹配。如果grid_size不同, `load_state_dict` 会报错，
-        # 但我们模型中的 `resample_abs_pos_embed_nhwc` 会在forward时处理。
-        # 在这里，我们确保它们在加载时是匹配的。
-        if 'pos_embed' in state_dict:
-            if state_dict['pos_embed'].shape != model.pos_embed.shape:
-                 _logger.warning(
-                    f"Positional embedding (new={model.pos_embed.shape}) 与 "
-                    f"checkpoint (old={state_dict['pos_embed'].shape}) 不匹配。"
-                    f"模型将在forward时自动插值。"
-                 )
-        
+        # 我们的模型 pos_embed 尺寸是固定的 [1, 64, 64, 768]
+        # 如果checkpoint中的尺寸不同，发出警告，但加载时strict=False会跳过它
+        if 'pos_embed' in filtered_state_dict and filtered_state_dict['pos_embed'].shape != model.pos_embed.shape:
+             _logger.warning(
+                f"Positional embedding (new={model.pos_embed.shape}) 与 "
+                f"checkpoint (old={filtered_state_dict['pos_embed'].shape}) 不匹配。"
+                f"模型将在forward时自动插值。"
+             )
+             # strict=False 会处理这个问题，无需手动删除
+             # del filtered_state_dict['pos_embed']
+
         # 加载状态字典
-        # strict=False 允许我们加载, 即使 pos_embed 尺寸不匹配 (尽管在这里它们是匹配的)
-        model.load_state_dict(state_dict, strict=False)
-        _logger.info("预训练权重加载成功。")
+        # strict=False 允许加载部分匹配的权重 (例如，跳过解码器层)
+        missing_keys, unexpected_keys = model.load_state_dict(filtered_state_dict, strict=False)
+        _logger.info(f"预训练权重加载完成。")
+        if missing_keys:
+            _logger.info(f"缺失的权重 (通常是解码器): {missing_keys}")
+        if unexpected_keys:
+            _logger.warning(f"意外的权重 (可能来自原始SAM的非编码器部分): {unexpected_keys}")
 
     return model
 
@@ -581,15 +663,17 @@ if __name__ == '__main__':
     model_1k = create_sam_b_variant(
         img_size=1024,
         target_patch_grid_size=64,
-        in_chans=3,
-        pretrained=True
+        in_chans=1,
+        pretrained=True,
+        num_classes=1 # 输出单通道分割图
     )
     dummy_1k = torch.randn(1, 3, 1024, 1024)
     with torch.no_grad():
-        features_1k = model_1k.forward_features(dummy_1k)
+        # 现在调用完整的 forward 方法
+        output_1k = model_1k(dummy_1k)
     print(f"1k Model (patch: {model_1k.patch_embed.patch_size[0]}): "
-          f"{dummy_1k.shape} -> {features_1k.shape}")
-    assert features_1k.shape == (1, 256, 64, 64)
+          f"{dummy_1k.shape} -> {output_1k.shape}")
+    assert output_1k.shape == (1, 1, 1024, 1024)
     print("1k 测试通过。")
 
     # 2. 8k 图像 -> 64x64 grid -> 128x128 patch
@@ -598,14 +682,15 @@ if __name__ == '__main__':
         img_size=8192,
         target_patch_grid_size=64,
         in_chans=3,
-        pretrained=True
+        pretrained=True,
+        num_classes=1
     )
     dummy_8k = torch.randn(1, 3, 8192, 8192)
     with torch.no_grad():
-        features_8k = model_8k.forward_features(dummy_8k)
+        output_8k = model_8k(dummy_8k)
     print(f"8k Model (patch: {model_8k.patch_embed.patch_size[0]}): "
-          f"{dummy_8k.shape} -> {features_8k.shape}")
-    assert features_8k.shape == (1, 256, 64, 64)
+          f"{dummy_8k.shape} -> {output_8k.shape}")
+    assert output_8k.shape == (1, 1, 8192, 8192)
     print("8k 测试通过。")
 
     # 3. 32k 图像 -> 64x64 grid -> 512x512 patch
@@ -614,13 +699,14 @@ if __name__ == '__main__':
         img_size=32768,
         target_patch_grid_size=64,
         in_chans=3,
-        pretrained=True
+        pretrained=True,
+        num_classes=1
     )
     dummy_32k = torch.randn(1, 3, 32768, 32768)
     with torch.no_grad():
-        features_32k = model_32k.forward_features(dummy_32k)
+        output_32k = model_32k(dummy_32k)
     print(f"32k Model (patch: {model_32k.patch_embed.patch_size[0]}): "
-          f"{dummy_32k.shape} -> {features_32k.shape}")
-    assert features_32k.shape == (1, 256, 64, 64)
+          f"{dummy_32k.shape} -> {output_32k.shape}")
+    assert output_32k.shape == (1, 1, 32768, 32768)
     print("32k 测试通过。")
 
