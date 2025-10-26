@@ -317,7 +317,7 @@ class VisionTransformerSAM(nn.Module):
             in_chans=in_chans,
             embed_dim=embed_dim,
             bias=not pre_norm,
-            **dd,
+            # **dd,  # <-- 修正：PatchEmbed不支持device/dtype参数
         )
         grid_size = self.patch_embed.grid_size
 
@@ -606,3 +606,4 @@ if __name__ == '__main__':
           f"{dummy_32k.shape} -> {features_32k.shape}")
     assert features_32k.shape == (1, 256, 64, 64)
     print("32k 测试通过。")
+
