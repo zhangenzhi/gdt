@@ -28,7 +28,7 @@ training:
 # 3. Data Configuration
 data:
   # !! 修改为您的 s8d 数据集切片目录 (包含 slice_manifest.csv) !!
-  data_dir: '/work/c30636/dataset/s8d/finetune/Noise_0.05_Blur_2_sparsity_2_NumAng_3600'
+  data_dir: '/work/c30636/dataset/s8d/finetune/Noise_1_Blur_2_sparsity_2_NumAng_3600/'
   num_workers: 8 # 处理大图像时，可以适当减少 num_workers 以节省 CPU 内存
 
 # 4. Output Configuration
