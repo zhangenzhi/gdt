@@ -34,4 +34,4 @@ data:
 # 4. Output Configuration
 output:
   base_dir: './output' # 保持输出根目录
-  save_dir: 'unet_resnet34_s8d_8k_run' # 更新保存目录名称
+  save_dir: 'unet_resnet18_s8d_8k_run' # 更新保存目录名称
