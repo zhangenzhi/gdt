@@ -51,4 +51,4 @@ output:
   # Base directory for saving results
   base_dir: './output'
   # Specific folder name for this run
-  save_dir: 'unetr_vit_base_1k_run'
+  save_dir: 'unetr_vit_base_1k_ep300'
