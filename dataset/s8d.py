@@ -13,6 +13,7 @@ import argparse
 from tqdm import tqdm
 from PIL import Image, ImageFile
 import tifffile
+import pandas as pd
 
 # Set the flag to load truncated images
 ImageFile.LOAD_TRUNCATED_IMAGES = True
