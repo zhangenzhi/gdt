@@ -201,7 +201,7 @@ def build_s8d_segmentation_dataloaders(data_dir, batch_size, num_workers):
     
     # 基于 volume_id 划分训练和验证集
     np.random.shuffle(volume_ids)
-    split_idx = int(len(volume_ids) * 0.8)
+    split_idx = int(len(volume_ids) * 0.95)
     train_volume_ids = volume_ids[:split_idx]
     val_volume_ids = volume_ids[split_idx:]
     
