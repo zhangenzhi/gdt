@@ -30,7 +30,7 @@ training:
   warmup_epochs: 5
   eta_min: 0.000001 # Minimum learning rate for cosine annealing
 
-  num_epochs: 100
+  num_epochs: 300
   # Batch size per GPU (adjust based on memory)
   batch_size: 2 # UNETR might be memory intensive
   # Accumulate gradients over N steps
