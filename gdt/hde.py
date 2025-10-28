@@ -211,14 +211,14 @@ class Rect:
 # --- Example Usage ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hierarchical HDE Visualization Demo')
-    # parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
-    parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
-    # parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/s8d_1_8k_c.png", help='Path to a local image to process.')
     args = parser.parse_args()
             
     # --- Start of Demo ---
-    IMG_SIZE = 512
-    FIXED_LENGTH = 256
+    IMG_SIZE = 1024
+    FIXED_LENGTH = 8194
     
     # Load image from path or create a synthetic one
     if args.image_path:
@@ -239,8 +239,23 @@ if __name__ == '__main__':
         original_image = cv2.circle(original_image, (128, 128), 90, (200, 150, 100), -1)
         original_image = cv2.circle(original_image, (90, 100), 20, (20, 40, 60), -1)
     
+    # # hydrogel
+    # gray_img = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+    # smooth_factor=5
+    # blurred = cv2.GaussianBlur(gray_img, (smooth_factor, smooth_factor), 0)
+    # edges = cv2.Canny(blurred, 120, 170)
+    
+    # # s8d
+    # gray_img = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+    # smooth_factor=5
+    # blurred = cv2.GaussianBlur(gray_img, (smooth_factor, smooth_factor), 0)
+    # edges = cv2.Canny(blurred, 180, 250)
+    
+    # paip
+    smooth_factor=3
     gray_img = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray_img, 50, 150)
+    blurred = cv2.GaussianBlur(gray_img, (smooth_factor, smooth_factor), 0)
+    edges = cv2.Canny(blurred, 110, 170)
 
     print("Processing with NEW HierarchicalHDEProcessor...")
     hierarchical_processor = HierarchicalHDEProcessor(visible_fraction=0.25)

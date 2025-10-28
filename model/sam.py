@@ -151,9 +151,18 @@ class Attention(nn.Module):
                 raise NotImplementedError("ROPE is not implemented in this simplified example.")
 
         if self.fused_attn:
+            # Note: attn_mask in scaled_dot_product_attention is boolean, not bias.
+            # Convert bias to mask if needed, or handle differently.
+            # For simplicity here, assuming attn_bias is None or handled correctly
+            attn_mask_for_fused = None
+            if attn_bias is not None:
+                # Example: convert bias to a mask, this might need adjustment
+                # attn_mask_for_fused = (attn_bias > -torch.inf)
+                _logger.warning("Fused attention does not directly support additive bias. Bias ignored.")
+
             x = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v,
-                attn_mask=attn_bias,
+                attn_mask=attn_mask_for_fused, # Use converted mask if applicable
                 dropout_p=self.attn_drop.p if self.training else 0.,
             )
         else:
@@ -281,34 +290,40 @@ class Block(nn.Module):
         return x
 
 
-# --- *** 新增：分割解码器 *** ---
+# --- *** 更新：使用Upsample + Conv2d 的分割解码器 *** ---
 class SimpleSegmentationDecoder(nn.Module):
-    def __init__(self, in_channels=256, out_channels=1, upsample_factor=16):
+    def __init__(self, in_channels=256, out_channels=1, upsample_factor=16, decoder_channels=(128, 64, 32, 16)):
         """
-        一个简单的分割解码器，用于将ViT特征图上采样到原始分辨率。
+        一个使用 nn.Upsample + nn.Conv2d 的分割解码器。
 
         Args:
             in_channels (int): 输入特征图的通道数 (来自ViT neck)。
             out_channels (int): 输出分割图的通道数 (例如，1用于二元分割)。
-            upsample_factor (int): 从特征图到原始图像尺寸的总上采样倍数。
-                                   等于 patch_size。
+            upsample_factor (int): 从特征图到原始图像尺寸的总上采样倍数。等于 patch_size。
+            decoder_channels (tuple): 解码器各阶段的中间通道数。
         """
         super().__init__()
         # 计算需要多少个2倍上采样层
         num_upsample_layers = int(torch.log2(torch.tensor(float(upsample_factor))).item())
 
+        # 确保decoder_channels的长度足够
+        if len(decoder_channels) < num_upsample_layers:
+            # 如果提供的通道数不足，重复最后一个通道数
+            decoder_channels = list(decoder_channels) + [decoder_channels[-1]] * (num_upsample_layers - len(decoder_channels))
+        elif len(decoder_channels) > num_upsample_layers:
+             _logger.warning(f"Decoder channels tuple length ({len(decoder_channels)}) is longer than required number of upsample layers ({num_upsample_layers}). Extra channels will be ignored.")
+             decoder_channels = decoder_channels[:num_upsample_layers]
+
+
         layers = []
         current_channels = in_channels
         for i in range(num_upsample_layers):
-            # 逐步减少通道数，最后一层除外，避免通道数过少
-            out_ch = current_channels // 2 if current_channels > 32 and i < num_upsample_layers -1 else current_channels
-            # 确保通道数至少为16
-            out_ch = max(16, out_ch)
-
+            out_ch = decoder_channels[i]
+            layers.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False))
+            # 卷积层用于学习和调整通道数
             layers.append(
-                nn.ConvTranspose2d(current_channels, out_ch, kernel_size=2, stride=2)
+                nn.Conv2d(current_channels, out_ch, kernel_size=3, padding=1, bias=False)
             )
-            # 添加BatchNorm和ReLU以提高稳定性
             layers.append(nn.BatchNorm2d(out_ch))
             layers.append(nn.ReLU(inplace=True))
             current_channels = out_ch
@@ -321,6 +336,7 @@ class SimpleSegmentationDecoder(nn.Module):
     def forward(self, x):
         # x shape: [B, C_neck, H_grid, W_grid]
         return self.decoder(x)
+
 
 # --- *** 修改后的 VisionTransformerSAM *** ---
 class VisionTransformerSAM(nn.Module):
@@ -354,6 +370,7 @@ class VisionTransformerSAM(nn.Module):
             window_size: int = 14,
             global_attn_indexes: Tuple[int, ...] = (),
             neck_chans: int = 256,
+            decoder_channels: Tuple[int, ...] = (128, 64, 32, 16), # 新增解码器通道参数
             device=None, # 保留以允许传递，但仅用于nn.Parameter
             dtype=None,
     ):
@@ -437,12 +454,13 @@ class VisionTransformerSAM(nn.Module):
             LayerNorm2d(neck_chans, **layer_dd),
         )
 
-        # --- *** 新增：添加解码器 *** ---
+        # --- *** 更新：使用新的解码器 *** ---
         # patch_size 就是总的下采样倍数
         self.decoder = SimpleSegmentationDecoder(
             in_channels=neck_chans,
             out_channels=num_classes,
-            upsample_factor=self.patch_size # 使用保存的patch_size
+            upsample_factor=self.patch_size, # 使用保存的patch_size
+            decoder_channels=decoder_channels # 传递通道配置
         )
 
 
@@ -469,6 +487,7 @@ class VisionTransformerSAM(nn.Module):
         # 确保输出尺寸与输入完全一致 (如果解码器设计精确，可能不需要插值)
         # 但为了鲁棒性，保留插值步骤
         if segmentation_logits.shape[2:] != x.shape[2:]:
+            # 如果解码器输出尺寸不匹配（例如，由于padding或stride），则强制插值
             segmentation_logits = F.interpolate(
                 segmentation_logits,
                 size=x.shape[2:],
@@ -494,8 +513,7 @@ def checkpoint_filter_fn(
             k = k[14:]
             k = k.replace('mlp.lin', 'mlp.fc')
 
-            # 如果是分割模型，跳过原始checkpoint中的neck和head层
-            # 修正: 应该保留neck层权重
+            # 如果是分割模型，跳过原始checkpoint中的head层
             if is_segmentation_model and k.startswith('head.'):
                  _logger.debug(f"Skipping loading key '{k}' for segmentation model.")
                  continue
@@ -542,17 +560,19 @@ def create_sam_b_variant(
     # in_chans: int = 3, # 移除参数，内部根据img_size决定
     target_patch_grid_size: int = 64,
     pretrained: bool = True,
-    num_classes: int = 1 # 添加参数以控制分割输出通道
+    num_classes: int = 1, # 添加参数以控制分割输出通道
+    decoder_channels: Tuple[int, ...] = (128, 64, 32, 16), # 解码器通道配置
 ) -> VisionTransformerSAM:
     """
     创建一个SAM-B（ViT-Base）变体模型，自动调整patch_size和in_chans以匹配目标网格大小和图像尺寸。
-    包含一个简单的分割解码器。
+    包含一个基于 Upsample + Conv2d 的分割解码器。
 
     Args:
         img_size (int): 您的输入图像尺寸 (1024, 8192, 32768).
         target_patch_grid_size (int): 您希望Transformer处理的目标序列长度 (e.g., 64)。
         pretrained (bool): 是否加载预训练的SAM编码器权重。
         num_classes (int): 分割输出的通道数 (e.g., 1 for binary segmentation)。
+        decoder_channels (tuple): 解码器各阶段的中间通道数。
 
     Returns:
         VisionTransformerSAM: 一个配置好并可选择性加载了权重的模型。
@@ -592,6 +612,7 @@ def create_sam_b_variant(
         in_chans=in_chans, # 使用确定的通道数
         neck_chans=256,
         num_classes=num_classes, # 传递给模型以设置解码器输出
+        decoder_channels=decoder_channels # 传递解码器配置
     )
 
     # 3. 从头创建模型
