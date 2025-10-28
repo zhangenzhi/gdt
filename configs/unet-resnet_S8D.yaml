@@ -1,41 +1,37 @@
-# Configuration for the U-Net Hydrogel Segmentation Model
+# Configuration for U-Net on S8D Segmentation (8k Resolution)
 
-# A name for this specific experiment run, used for creating output directories
-task_name: "unet_resnet18_1k_run"
+task_name: "unet_resnet34_s8d_8k_run" # 更新任务名称
 
 # 1. Model Configuration
 model:
-  # You can choose from 'resnet18', 'resnet34', 'resnet50', etc.
-  backbone_name: 'resnet18'
-  pretrained: False
-  in_chans: 1
-  num_classes: 1
-  # The size the images will be resized to
-  img_size: 8192
+  backbone_name: 'resnet34' # 使用 ResNet34，基于之前的 8k 测试
+  pretrained: True
+  in_chans: 1 # s8d 是单通道 (原始 8192x8192x1)
+  num_classes: 5 # s8d 有 5 个类别 (包括背景, 目标掩码 8192x8192x5)
+  img_size: 8192 # !! 修改: 使用原始 8k 分辨率 !!
 
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  learning_rate: 0.001
-  # Betas for AdamW optimizer
+  learning_rate: 0.0001 # 保持较低的学习率
   betas: [0.9, 0.999]
   weight_decay: 0.05
   warmup_epochs: 5
-  # Minimum learning rate for cosine annealing
-  eta_min: 0.0001
+  eta_min: 0.000001
 
-  num_epochs: 30000
-  # Batch size per GPU
-  batch_size: 1
-  # Accumulate gradients over N steps before updating weights
-  gradient_accumulation_steps: 1
+  num_epochs: 100
+  batch_size: 1 # !! 修改: 由于使用 8k 分辨率，batch size 必须设为 1 !!
+  gradient_accumulation_steps: 16 # !! 修改: 增加梯度累积步数以补偿小 batch size (1 * 16 = 16) !!
 
-  # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
   use_compile: False
 
 # 3. Data Configuration
 data:
-  # Root directory path of the dataset (can be overridden by command line)
-  data_dir: '/work/c30636/dataset/s8d'
-  # Number of worker processes for DataLoader
-  num_workers: 8
+  # !! 修改为您的 s8d 数据集切片目录 (包含 slice_manifest.csv) !!
+  data_dir: '/work/c30636/dataset/s8d/finetune/Noise_0.05_Blur_2_sparsity_2_NumAng_3600'
+  num_workers: 8 # 处理大图像时，可以适当减少 num_workers 以节省 CPU 内存
+
+# 4. Output Configuration
+output:
+  base_dir: './output' # 保持输出根目录
+  save_dir: 'unet_resnet34_s8d_8k_run' # 更新保存目录名称
