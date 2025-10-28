@@ -85,7 +85,7 @@ class UNetWithBackbone(nn.Module):
         logits = self.outc(x_decoder)
         return F.interpolate(logits, size=x.shape[2:], mode='bilinear', align_corners=False)
 
-def create_unet_model(backbone_name='resnet34', pretrained=True, in_chans=1):
+def create_unet_model(backbone_name='resnet34', pretrained=True, in_chans=1, num_classes=1):
     """
     使用timm库和指定的backbone创建一个U-Net模型。
 
@@ -104,7 +104,7 @@ def create_unet_model(backbone_name='resnet34', pretrained=True, in_chans=1):
         features_only=True,
         out_indices=(0, 1, 2, 3, 4), # 指定输出5个阶段的特征图以匹配U-Net结构
     )
-    model = UNetWithBackbone(backbone, n_classes=1)
+    model = UNetWithBackbone(backbone, n_classes=num_classes)
     return model
 
 # --- 本地测试 ---
