@@ -264,7 +264,7 @@ def train(config, args):
 
     # 应用分布式数据并行
     if use_ddp:
-        model = DDP(model, device_ids=[local_rank], find_unused_parameters=False) # find_unused_parameters=False 通常更高效
+        model = DDP(model, device_ids=[local_rank], find_unused_parameters=True) # find_unused_parameters=False 通常更高效
 
     # --- 损失，优化器，调度器 ---
     criterion = DiceBCELoss()
