@@ -5,7 +5,7 @@ task_name: "unet_resnet34_s8d_8k_run" # 更新任务名称
 # 1. Model Configuration
 model:
   backbone_name: 'resnet34' # 使用 ResNet34，基于之前的 8k 测试
-  pretrained: True
+  pretrained: False
   in_chans: 1 # s8d 是单通道 (原始 8192x8192x1)
   num_classes: 5 # s8d 有 5 个类别 (包括背景, 目标掩码 8192x8192x5)
   img_size: 8192 # !! 修改: 使用原始 8k 分辨率 !!
