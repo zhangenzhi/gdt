@@ -452,7 +452,7 @@ def train(config, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SAM-B Segmentation Training Script")
-    parser.add_argument('--config', type=str, default='./config_sam.yaml', help='配置文件路径')
+    parser.add_argument('--config', type=str, default='./configs/sam-b_HDG.yaml', help='配置文件路径')
     # 数据和输出路径通常通过配置文件设置，但保留命令行覆盖选项
     parser.add_argument('--data_dir', type=str, default=None, help='数据集目录路径 (覆盖配置文件)')
     parser.add_argument('--output', type=str, default=None, help='输出根目录 (覆盖配置文件)')
