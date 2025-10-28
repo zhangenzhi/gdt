@@ -34,7 +34,7 @@ training:
   # Batch size per GPU (adjust based on memory)
   batch_size: 2 # UNETR might be memory intensive
   # Accumulate gradients over N steps
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 1
 
   # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
   use_compile: False
