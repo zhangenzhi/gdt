@@ -17,7 +17,7 @@ training:
   betas: [0.9, 0.999]
   weight_decay: 0.05
   warmup_epochs: 5
-  eta_min: 0.000001
+  eta_min: 0.00001
 
   num_epochs: 100
   batch_size: 1 # !! 修改: 由于使用 8k 分辨率，batch size 必须设为 1 !!

@@ -261,7 +261,7 @@ def train(config, args):
         logging.info(f"总步数: {num_training_steps}, Warmup 步数: {num_warmup_steps}")
 
     if num_warmup_steps > 0:
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
         main_scheduler = CosineAnnealingLR(optimizer, T_max=max(1, num_training_steps - num_warmup_steps), eta_min=config['training']['eta_min'])
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
