@@ -1,0 +1,54 @@
+# Configuration for the UNETR-2D Hydrogel Segmentation Model
+
+# A name for this specific experiment run, used for creating output directories
+task_name: "unetr_vit_base_1k_run"
+
+# 1. Model Configuration
+model:
+  # Timm backbone name (e.g., vit_base_patch16_224, vit_small_patch16_224)
+  backbone_name: 'vit_base_patch16_224'
+  pretrained: True # Use pretrained backbone weights
+  # Input image size (must match dataloader)
+  img_size: 1024
+  # Input channels (1 for grayscale)
+  in_chans: 1
+  # Number of output classes for segmentation (1 for binary)
+  num_classes: 1
+  # Indices of ViT blocks to extract features from
+  # Should match the depth of the chosen backbone (e.g., ViT-Base has depth 12)
+  feature_indices: [2, 5, 8, 11]
+  # Channels for the CNN decoder stages (deepest to shallowest)
+  decoder_channels: [256, 128, 64, 32]
+
+# 2. Training Hyperparameters
+training:
+  optimizer: "AdamW"
+  # Learning rate often needs tuning, potentially lower for fine-tuning
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  weight_decay: 0.05
+  warmup_epochs: 5
+  eta_min: 0.000001 # Minimum learning rate for cosine annealing
+
+  num_epochs: 100
+  # Batch size per GPU (adjust based on memory)
+  batch_size: 2 # UNETR might be memory intensive
+  # Accumulate gradients over N steps
+  gradient_accumulation_steps: 4
+
+  # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
+  use_compile: False
+
+# 3. Data Configuration
+data:
+  # Root directory path of the dataset
+  data_dir: '/work/c30636/dataset/hydrogel-s'
+  # Number of worker processes for DataLoader
+  num_workers: 8
+
+# 4. Output Configuration
+output:
+  # Base directory for saving results
+  base_dir: './output'
+  # Specific folder name for this run
+  save_dir: 'unetr_vit_base_1k_run'
