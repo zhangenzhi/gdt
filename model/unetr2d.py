@@ -78,7 +78,11 @@ def resample_abs_pos_embed(
         _logger.info(f'Resampling pos_embed, grid {old_grid_size} -> {new_grid_size}, T={T}')
 
     # Reshape B x N x C -> B x C x H x W
+    # Corrected reshape based on original grid size
+    if posemb_grid.shape[1] != old_grid_size[0] * old_grid_size[1]:
+        raise ValueError(f"posemb_grid size {posemb_grid.shape[1]} does not match old_grid_size {old_grid_size}")
     posemb_grid = posemb_grid.transpose(-1, -2).reshape(posemb.shape[0], posemb.shape[2], old_grid_size[0], old_grid_size[1])
+
 
     posemb_grid = F.interpolate(
         posemb_grid,
@@ -126,19 +130,31 @@ class UNETR2D(nn.Module):
             backbone_name,
             pretrained=pretrained,
             in_chans=in_chans,
-            # img_size=img_size, # Timm ViT doesn't always use img_size directly here
-            # Request features from specific blocks AND the final output
+            img_size=img_size, # *** Explicitly set img_size for backbone ***
             features_only=False, # We need access to blocks manually
         )
 
         # Store original pos embed and grid size
         self.orig_pos_embed = self.backbone.pos_embed.data.clone() if self.backbone.pos_embed is not None else None
         # Infer original grid size from pos_embed (excluding class token if present)
-        num_pos_tokens = self.backbone.pos_embed.shape[1] if self.backbone.pos_embed is not None else 0
-        num_prefix_tokens = self.backbone.num_prefix_tokens
-        num_patch_tokens = num_pos_tokens - num_prefix_tokens
-        self.orig_grid_size = int(num_patch_tokens ** 0.5)
-        self.num_prefix_tokens = num_prefix_tokens # Store number of prefix tokens (e.g., class token)
+        # Handle cases where pos_embed might be None or not have expected shape
+        if self.backbone.pos_embed is not None and len(self.backbone.pos_embed.shape) == 3 and self.backbone.pos_embed.shape[1] > self.backbone.num_prefix_tokens:
+            num_pos_tokens = self.backbone.pos_embed.shape[1]
+            num_prefix_tokens = self.backbone.num_prefix_tokens
+            num_patch_tokens = num_pos_tokens - num_prefix_tokens
+            # Ensure num_patch_tokens is a perfect square
+            if int(num_patch_tokens ** 0.5) ** 2 == num_patch_tokens:
+                self.orig_grid_size = int(num_patch_tokens ** 0.5)
+            else:
+                _logger.warning(f"Could not infer original grid size from pos_embed shape {self.backbone.pos_embed.shape} and prefix tokens {num_prefix_tokens}. Using patch_embed grid size.")
+                # Fallback to patch_embed grid_size if inference fails
+                self.orig_grid_size = self.backbone.patch_embed.grid_size[0] # Assume square
+        else:
+             _logger.warning(f"Pos_embed not found or has unexpected shape ({self.backbone.pos_embed.shape if self.backbone.pos_embed is not None else 'None'}). Using patch_embed grid size for original.")
+             self.orig_grid_size = self.backbone.patch_embed.grid_size[0] # Assume square
+
+        self.num_prefix_tokens = self.backbone.num_prefix_tokens # Store number of prefix tokens (e.g., class token)
+
 
         # Check patch embed config and store grid size calculation function
         self.grid_size = self.backbone.patch_embed.grid_size
@@ -146,35 +162,25 @@ class UNETR2D(nn.Module):
         self.patch_size = self.backbone.patch_embed.patch_size[0]
 
         # --- Manually adjust patch embedding if input channels don't match ---
+        # Note: timm's create_model with in_chans often handles this, but double-checking
         if in_chans != self.backbone.patch_embed.proj.in_channels:
              _logger.warning(
-                 f"Input channels ({in_chans}) mismatch pretrained ({self.backbone.patch_embed.proj.in_channels}). "
-                 f"Adapting patch embedding projection."
+                 f"Input channels ({in_chans}) potentially mismatch pretrained backbone ({self.backbone.patch_embed.proj.in_channels}). "
+                 f"Timm's create_model usually adapts this, but verify weights if issues arise."
              )
-             orig_weight = self.backbone.patch_embed.proj.weight.data
-             orig_bias = self.backbone.patch_embed.proj.bias.data if self.backbone.patch_embed.proj.bias is not None else None
-             new_proj = nn.Conv2d(
-                 in_chans,
-                 encoder_embed_dim,
-                 kernel_size=self.backbone.patch_embed.patch_size,
-                 stride=self.backbone.patch_embed.stride,
-                 padding=self.backbone.patch_embed.padding
-             )
-
-             # Adapt weights (simple averaging if going from 3 to 1)
-             if in_chans == 1 and orig_weight.shape[1] == 3:
-                 new_proj.weight.data = orig_weight.mean(dim=1, keepdim=True)
-             elif in_chans==3 and orig_weight.shape[1]==1:
-                 # If pretrained was 1 channel and we need 3, replicate
-                  _logger.warning("Replicating single-channel patch embed weights to 3 channels.")
-                  new_proj.weight.data = orig_weight.repeat(1, 3, 1, 1)
-             else:
-                 _logger.warning("Could not automatically adapt patch embedding weights for channels. Using random init for proj.")
-                 # Keep random init
-
-             if orig_bias is not None:
-                 new_proj.bias.data = orig_bias
-             self.backbone.patch_embed.proj = new_proj
+             # The adaptation logic previously here might be redundant if timm handles it.
+             # Keeping the logic just in case, but it might need refinement based on how timm truly handles adaptation.
+             if self.backbone.patch_embed.proj.weight.shape[1] == 3 and in_chans == 1:
+                  _logger.info("Attempting manual adaptation of patch embed from 3 to 1 channels (average).")
+                  orig_weight = self.backbone.patch_embed.proj.weight.data
+                  orig_bias = self.backbone.patch_embed.proj.bias.data if self.backbone.patch_embed.proj.bias is not None else None
+                  new_proj = nn.Conv2d(
+                      in_chans, encoder_embed_dim, kernel_size=self.backbone.patch_embed.patch_size,
+                      stride=self.backbone.patch_embed.stride, padding=self.backbone.patch_embed.padding
+                  )
+                  new_proj.weight.data = orig_weight.mean(dim=1, keepdim=True)
+                  if orig_bias is not None: new_proj.bias.data = orig_bias
+                  self.backbone.patch_embed.proj = new_proj
 
         # --- Skip Connection Feature Dimensions ---
         # For standard ViT, all intermediate blocks have the same embed_dim
@@ -224,18 +230,22 @@ class UNETR2D(nn.Module):
         self.segmentation_head = nn.Conv2d(current_channels, num_classes, kernel_size=1)
 
     def _interpolate_pos_embed(self, x, H_grid: int, W_grid: int):
-        """ Handles positional embedding interpolation. """
+        """ Handles positional embedding interpolation. Takes BNC input. """
         if self.orig_pos_embed is None:
-            return x # No pos embed to interpolate
+             _logger.warning("Original positional embedding not found. Skipping interpolation.")
+             return x # No pos embed to interpolate
 
         # target shape for interpolation (excluding prefix tokens)
         new_grid_size = (H_grid, W_grid)
+        # Ensure old_grid_size is correctly derived
         old_grid_size = (self.orig_grid_size, self.orig_grid_size)
 
+
+        # Check if interpolation is needed
         if new_grid_size != old_grid_size:
             #_logger.info(f"Interpolating pos embed from {old_grid_size} to {new_grid_size}")
             pos_embed_interpolated = resample_abs_pos_embed(
-                self.orig_pos_embed,
+                self.orig_pos_embed.to(x.device), # Ensure pos_embed is on the same device
                 new_grid_size=list(new_grid_size),
                 old_grid_size=list(old_grid_size),
                 num_prefix_tokens=self.num_prefix_tokens,
@@ -244,10 +254,15 @@ class UNETR2D(nn.Module):
                 verbose=False, # Set to True for debugging
             )
             # Add interpolated pos embed to x (which is BNC)
-            x = x + pos_embed_interpolated[:, self.num_prefix_tokens:, :]
+            # Handle prefix tokens correctly
+            x_prefix = x[:, :self.num_prefix_tokens]
+            x_grid = x[:, self.num_prefix_tokens:]
+            x_grid = x_grid + pos_embed_interpolated[:, self.num_prefix_tokens:, :]
+            x = torch.cat([x_prefix, x_grid], dim=1)
+
         else:
             # Add original pos embed
-            x = x + self.orig_pos_embed[:, self.num_prefix_tokens:, :]
+            x = x + self.orig_pos_embed.to(x.device) # Ensure device match
 
         return x
 
@@ -255,86 +270,88 @@ class UNETR2D(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # --- Encoder Forward ---
         # 1. Patch Embedding
-        x_patch = self.backbone.patch_embed(x) # Output BNC: [B, N, C]
-        B, N, C = x_patch.shape
-        H_grid, W_grid = self.backbone.patch_embed.grid_size # Get grid size
+        x_patch_raw = self.backbone.patch_embed(x) # Output BNC: [B, N, C]
+        B, N, C = x_patch_raw.shape
+        # Get grid size directly after patch embedding
+        H_grid, W_grid = self.backbone.patch_embed.grid_size # Use the actual grid size
 
-        # Handle prefix tokens (e.g., class token) if they exist
-        if self.num_prefix_tokens > 0:
-            cls_tokens = self.backbone.cls_token.expand(B, -1, -1)
-            x_patch = torch.cat((cls_tokens, x_patch), dim=1)
+        # 2. Add class token if needed by the backbone
+        if hasattr(self.backbone, 'cls_token') and self.backbone.cls_token is not None:
+             cls_tokens = self.backbone.cls_token.expand(B, -1, -1)
+             x_with_cls = torch.cat((cls_tokens, x_patch_raw), dim=1)
+        else:
+             # Make sure num_prefix_tokens is 0 if no class token
+             if self.num_prefix_tokens != 0:
+                  _logger.warning("Backbone has no cls_token but num_prefix_tokens > 0. Resetting to 0.")
+                  self.num_prefix_tokens = 0
+             x_with_cls = x_patch_raw
 
-        # 2. Add Positional Embedding (Interpolated)
-        x_with_pos = self._interpolate_pos_embed(x_patch, H_grid, W_grid)
+
+        # 3. Add Positional Embedding (Interpolated)
+        x_with_pos = self._interpolate_pos_embed(x_with_cls, H_grid, W_grid)
         x_with_pos = self.backbone.pos_drop(x_with_pos)
 
-        # Remove prefix tokens before passing to blocks if blocks don't expect them?
-        # Standard ViT blocks expect the full sequence including class token.
         current_x_bnc = x_with_pos # Keep BNC format for blocks
 
         skip_connections = {} # Store skips by index
 
-        # 3. Iterate through ViT Blocks
+        # 4. Iterate through ViT Blocks
         for i, blk in enumerate(self.backbone.blocks):
             current_x_bnc = blk(current_x_bnc)
             # Store output if it's one of the feature indices
             if i in self.feature_indices:
-                # Remove prefix tokens before reshaping? Assume skip features don't include cls token.
+                # Remove prefix tokens before reshaping for skip connection
                 feature_bnc = current_x_bnc[:, self.num_prefix_tokens:, :]
                 # Reshape BNC -> B, H, W, C -> B, C, H, W for decoder
-                feature_nchw = feature_bnc.reshape(B, H_grid, W_grid, C).permute(0, 3, 1, 2).contiguous()
-                skip_connections[i] = feature_nchw
+                # Ensure C matches embed_dim if reshaping
+                if feature_bnc.shape[-1] != C:
+                     _logger.warning(f"Feature dimension {feature_bnc.shape[-1]} != Embed dim {C} at block {i}. Using embed dim C.")
+                     # This case shouldn't happen with standard ViTs but added for safety
+                try:
+                    feature_nchw = feature_bnc.reshape(B, H_grid, W_grid, C).permute(0, 3, 1, 2).contiguous()
+                    skip_connections[i] = feature_nchw
+                except RuntimeError as e:
+                     _logger.error(f"Error reshaping skip connection at block {i}. Shape was {feature_bnc.shape}, target grid {H_grid}x{W_grid}. Error: {e}")
+                     # Handle error, maybe skip this connection or raise
+                     raise e
+
                 # _logger.debug(f"Stored skip connection from block {i}: {feature_nchw.shape}")
 
 
         # --- Decoder Forward ---
         # Ensure skip connections were extracted correctly
         if len(skip_connections) != len(self.feature_indices):
-             raise RuntimeError(f"Extracted {len(skip_connections)} skip connections, but expected {len(self.feature_indices)}. Check feature_indices.")
+             # Try to find missing indices
+             missing_indices = set(self.feature_indices) - set(skip_connections.keys())
+             raise RuntimeError(f"Extracted {len(skip_connections)} skip connections ({list(skip_connections.keys())}), but expected {len(self.feature_indices)} ({list(self.feature_indices)}). Missing: {missing_indices}. Check feature_indices.")
+
 
         # Sort indices to process from deep to shallow
         sorted_indices = sorted(self.feature_indices, reverse=True)
 
         # Start with the deepest feature map
         decoder_x = skip_connections[sorted_indices[0]]
-        # _logger.debug(f"Decoder input start (deepest skip {sorted_indices[0]}): {decoder_x.shape}")
-
 
         # Apply decoder blocks, combining with skip connections from shallower layers
         for i in range(len(self.decoder_blocks)):
             # Skip connection comes from the next shallower feature index
             skip_index = sorted_indices[i + 1]
             skip = skip_connections[skip_index]
-            # _logger.debug(f"Applying decoder block {i} with skip {skip_index} ({skip.shape}) to input ({decoder_x.shape})")
             decoder_x = self.decoder_blocks[i](decoder_x, skip)
-            # _logger.debug(f"Output of decoder block {i}: {decoder_x.shape}")
 
 
-        # Apply final block with the shallowest skip connection
-        # Skip connection comes from the shallowest feature index
-        # skip_index_shallowest = sorted_indices[-1] # This was already used in the loop
-        # Instead, the final block uses the output of the last decoder_block and the shallowest skip
-        skip_shallowest = skip_connections[sorted_indices[-1]] # Shallowest stored skip
-        # _logger.debug(f"Applying final block with shallowest skip {sorted_indices[-1]} ({skip_shallowest.shape}) to input ({decoder_x.shape})")
-        # --- Correction: Final block input should be output of last loop iter ---
-        # The loop iterates len(decoder_blocks) times = len(feature_indices) - 1
-        # The final skip connection needed is feature_indices[0] (shallowest)
+        # Apply final block using the output of the last decoder stage and the shallowest skip connection
         skip_0 = skip_connections[self.feature_indices[0]] # Get shallowest skip by original index
         decoder_x = self.final_block(decoder_x, skip_0)
-        # _logger.debug(f"Output of final block: {decoder_x.shape}")
 
 
         # --- Final Upsampling & Output ---
         x_out = self.final_upsample(decoder_x)
-        # _logger.debug(f"Output after final upsample: {x_out.shape}")
-
         logits = self.segmentation_head(x_out)
-        # _logger.debug(f"Output after segmentation head: {logits.shape}")
 
 
         # Ensure final output size matches input size
         if logits.shape[2:] != x.shape[2:]:
-            # _logger.debug(f"Interpolating final output from {logits.shape[2:]} to {x.shape[2:]}")
             logits = F.interpolate(logits, size=x.shape[2:], mode='bilinear', align_corners=False)
 
         return logits
@@ -359,15 +376,21 @@ def create_unetr_model(
     # Validate feature indices against known backbone depth (simple check)
     try:
         # Attempt to get default config to infer depth, might fail for some models
-        default_cfg = timm.get_pretrained_cfg(backbone_name)
-        backbone_depth = default_cfg.get('depth', None) if default_cfg else None
+        # Use create_model to get depth directly if possible
+        temp_model = timm.create_model(backbone_name, features_only=False) # Create full model temporarily
+        backbone_depth = len(temp_model.blocks) if hasattr(temp_model, 'blocks') else None
+        del temp_model # Free memory
+
         if backbone_depth and max(feature_indices) >= backbone_depth:
             _logger.warning(
-                f"Max feature index ({max(feature_indices)}) >= backbone depth ({backbone_depth}). "
-                f"Ensure indices are valid for '{backbone_name}'."
+                f"Max feature index ({max(feature_indices)}) >= inferred backbone depth ({backbone_depth}). "
+                f"Ensure indices are valid (0-based) for '{backbone_name}'."
             )
-    except Exception:
-        _logger.warning(f"Could not automatically determine depth for '{backbone_name}'. Please verify feature_indices.")
+        elif not backbone_depth:
+             _logger.warning(f"Could not infer depth for '{backbone_name}' via block count. Verify feature_indices.")
+
+    except Exception as e:
+        _logger.warning(f"Could not automatically determine depth for '{backbone_name}'. Please verify feature_indices. Error: {e}")
 
     model = UNETR2D(
         backbone_name=backbone_name,
