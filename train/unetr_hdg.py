@@ -482,7 +482,7 @@ def train(config, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UNETR-2D Segmentation Training Script")
-    parser.add_argument('--config', type=str, default='./config_unetr.yaml', help='配置文件路径') # 默认使用unetr配置
+    parser.add_argument('--config', type=str, default='./configs/unetr_HDG.yaml', help='配置文件路径') # 默认使用unetr配置
     parser.add_argument('--data_dir', type=str, default=None, help='数据集目录路径 (覆盖配置文件)')
     parser.add_argument('--output', type=str, default=None, help='输出根目录 (覆盖配置文件)')
     parser.add_argument('--savefile', type=str, default=None, help='本次运行的保存文件夹名 (覆盖配置文件)')
