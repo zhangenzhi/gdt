@@ -22,25 +22,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda.amp import GradScaler, autocast
 
 # --- 导入我们自己的模块 ---
-try:
-    # !! 修改: 导入 UNETR 模型 !!
-    from model.unetr_model import create_unetr_model
-    from model.losses import DiceBCELoss
-    from dataset.hdg import create_dataloaders
-except ImportError as e:
-    print("导入错误: 请确保您的项目文件结构包含 unetr_model.py:")
-    print("project_root/")
-    print("├── model/")
-    print("│   ├── unetr_model.py") # 新增
-    print("│   ├── sam_model.py")
-    print("│   └── losses.py")
-    print("├── dataset/")
-    print("│   └── hdg.py")
-    print("└── train/")
-    print("    ├── unetr_train.py (此脚本)")
-    print("    └── sam_seg_train.py")
-    print(f"原始错误: {e}")
-    sys.exit(1)
+# !! 修改: 导入 UNETR 模型 !!
+from model.unetr2d import create_unetr_model
+from model.losses import DiceBCELoss
+from dataset.hdg import create_dataloaders
+
 
 
 def setup_logging(output_dir, save_dir):
