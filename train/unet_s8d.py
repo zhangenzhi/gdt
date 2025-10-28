@@ -209,8 +209,8 @@ def train(config, args):
             data_dir=args.data_dir,
             batch_size=config['training']['batch_size'],
             num_workers=config['data']['num_workers'],
-            img_size=config['model']['img_size'], # 传递 img_size
-            use_ddp=use_ddp
+            # img_size=config['model']['img_size'], # 传递 img_size
+            # use_ddp=use_ddp
         )
         train_loader = dataloaders['train']
         val_loader = dataloaders['val']
