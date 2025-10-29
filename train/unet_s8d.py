@@ -67,8 +67,14 @@ def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds_lo
     mean = val_loader.mean if hasattr(val_loader, 'mean') else 0.0
     std = val_loader.std if hasattr(val_loader, 'std') else 1.0
 
-    mean_tensor = torch.tensor([mean] * images.shape[1]).view(1, -1, 1, 1).to(images.device)
-    std_tensor = torch.tensor([std] * images.shape[1]).view(1, -1, 1, 1).to(images.device)
+    # Ensure tensors are on the correct device for visualization (usually CPU)
+    images = images.cpu()
+    targets = targets.cpu()
+    preds_logits = preds_logits.cpu()
+
+
+    mean_tensor = torch.tensor([mean] * images.shape[1]).view(1, -1, 1, 1) # No need for device here
+    std_tensor = torch.tensor([std] * images.shape[1]).view(1, -1, 1, 1)
 
     fig, axes = plt.subplots(3, 7, figsize=(28, 12))
     fig.suptitle(f'Epoch {epoch + 1} Validation Results (U-Net S8D)', fontsize=20)
@@ -80,10 +86,12 @@ def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds_lo
 
     for i in range(num_samples_to_show):
         img_tensor = images[i]
+        # Perform denormalization on CPU
         img_denorm = img_tensor * std_tensor.squeeze() + mean_tensor.squeeze()
         img_denorm = img_denorm.clamp(0, 1)
 
-        img_np = img_denorm.cpu().numpy()
+
+        img_np = img_denorm.numpy() # Already on CPU
         if img_np.shape[0] == 1:
             img_np_display = img_np.squeeze(0)
             cmap_img = 'gray'
@@ -91,12 +99,16 @@ def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds_lo
             img_np_display = img_np.transpose(1, 2, 0)
             cmap_img = None
 
-        tgt = targets[i].cpu().numpy() # (H, W)
-        prd = preds[i].cpu().numpy()   # (H, W)
+        tgt = targets[i].numpy() # (H, W)
+        prd = preds[i].numpy()   # (H, W)
 
         # 应用颜色映射
-        tgt_color = color_map[tgt] # (H, W, 3)
-        prd_color = color_map[prd] # (H, W, 3)
+        # Handle potential out-of-bounds indices if target has unexpected values
+        tgt_clipped = np.clip(tgt, 0, num_classes - 1)
+        prd_clipped = np.clip(prd, 0, num_classes - 1)
+        tgt_color = color_map[tgt_clipped] # (H, W, 3)
+        prd_color = color_map[prd_clipped] # (H, W, 3)
+
 
         axes[0, i].imshow(img_np_display, cmap=cmap_img)
         axes[0, i].set_title(f'Image {i+1}')
@@ -125,12 +137,12 @@ def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds_lo
 
 
 def evaluate(model, val_loader, criterion, device, epoch, args, num_classes):
-    """评估模型（多类别）并可视化结果。"""
+    """评估模型（多类别）并可视化结果。不进行 DDP 同步。"""
     model.eval()
     total_val_loss = 0.0
     total_dice_score = 0.0
     is_main_process = not dist.is_initialized() or dist.get_rank() == 0
-    all_images, all_targets, all_logits = [], [], []
+    all_images, all_targets, all_logits = [], [], [] # 仅在主进程填充
 
     with torch.no_grad():
         val_iterator = tqdm(val_loader, desc=f"Epoch {epoch+1} Validation", disable=(not is_main_process))
@@ -138,35 +150,51 @@ def evaluate(model, val_loader, criterion, device, epoch, args, num_classes):
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True).long() # 确保是 Long
 
-            with autocast(dtype=torch.bfloat16):
-                logits = model(images)
-                loss = criterion(logits.float(), targets) # 全精度计算损失
+            try:
+                with autocast(dtype=torch.bfloat16):
+                    logits = model(images)
+                    loss = criterion(logits.float(), targets) # 全精度计算损失
 
-            batch_loss = loss.item()
-            # 计算平均前景 Dice
-            batch_dice = mean_dice_score_multi(logits, targets, num_classes=num_classes, exclude_background=True)
+                batch_loss = loss.item()
+                # 计算平均前景 Dice
+                batch_dice = mean_dice_score_multi(logits, targets, num_classes=num_classes, exclude_background=True)
 
-            # --- DDP 同步 Batch 指标 ---
-            if dist.is_initialized():
-                loss_tensor = torch.tensor(batch_loss, device=device)
-                dice_tensor = torch.tensor(batch_dice, device=device)
-                dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
-                dist.all_reduce(dice_tensor, op=dist.ReduceOp.AVG)
-                batch_loss = loss_tensor.item()
-                batch_dice = dice_tensor.item()
+                # --- **修改点: 移除 DDP 同步 Batch 指标** ---
+                # if dist.is_initialized():
+                #     loss_tensor = torch.tensor(batch_loss, device=device)
+                #     dice_tensor = torch.tensor(batch_dice, device=device)
+                #     dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+                #     dist.all_reduce(dice_tensor, op=dist.ReduceOp.AVG)
+                #     batch_loss = loss_tensor.item()
+                #     batch_dice = dice_tensor.item()
 
-            total_val_loss += batch_loss
-            total_dice_score += batch_dice
+                total_val_loss += batch_loss
+                total_dice_score += batch_dice
 
-            if is_main_process:
-                # 仅收集第一个 batch 的数据用于可视化，或根据需要调整
-                if len(all_images) == 0:
-                     all_images.append(images.cpu())
-                     all_targets.append(targets.cpu())
-                     all_logits.append(logits.cpu()) # 保存 logits 用于可视化
+                if is_main_process:
+                    # 仅收集第一个 batch 的数据用于可视化，以防验证集过大
+                    if len(all_images) == 0:
+                         # Move tensors to CPU before appending to avoid GPU memory accumulation
+                         all_images.append(images.cpu())
+                         all_targets.append(targets.cpu())
+                         all_logits.append(logits.cpu()) # 保存 logits 用于可视化
 
-                val_iterator.set_postfix({'val_loss': f"{batch_loss:.4f}", 'val_dice': f"{batch_dice:.4f}"})
+                    val_iterator.set_postfix({'val_loss': f"{batch_loss:.4f}", 'val_dice': f"{batch_dice:.4f}"})
 
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e):
+                    if is_main_process:
+                         logging.error(f"验证期间 CUDA 内存不足！跳过此 batch。 Batch shape: {images.shape}")
+                    torch.cuda.empty_cache() # 尝试释放内存
+                    continue # 跳过这个 batch
+                else:
+                    if is_main_process:
+                         logging.error(f"验证期间发生错误: {e}", exc_info=True)
+                    # Don't re-raise during eval, just log and continue if possible
+                    continue # Skip batch on other errors during eval
+
+
+    # 计算本地进程的平均值
     num_batches = len(val_loader)
     avg_val_loss = total_val_loss / num_batches if num_batches > 0 else 0.0
     avg_dice_score = total_dice_score / num_batches if num_batches > 0 else 0.0
@@ -182,7 +210,8 @@ def evaluate(model, val_loader, criterion, device, epoch, args, num_classes):
         else:
             logging.warning("未能收集到用于可视化的验证数据。")
 
-    return avg_val_loss, avg_dice_score # 返回同步后的平均值
+    # 返回本地进程的平均值
+    return avg_val_loss, avg_dice_score
 
 
 def train(config, args):
@@ -211,8 +240,8 @@ def train(config, args):
             data_dir=args.data_dir,
             batch_size=config['training']['batch_size'],
             num_workers=config['data']['num_workers'],
-            # img_size=config['model']['img_size'], # 传递 img_size
-            # use_ddp=use_ddp
+            img_size=config['model']['img_size'], # 传递 img_size
+            use_ddp=use_ddp
         )
         train_loader = dataloaders['train']
         val_loader = dataloaders['val']
@@ -253,17 +282,24 @@ def train(config, args):
     num_epochs = config['training']['num_epochs']
     warmup_epochs = config['training'].get('warmup_epochs', 0)
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
-    steps_per_epoch_exact = len(train_loader) / accumulation_steps
-    optimizer_steps_per_epoch = max(1, int(steps_per_epoch_exact))
+    # 计算每个进程的 optimizer 步数
+    local_steps_per_epoch = len(train_loader) // accumulation_steps if len(train_loader) > 0 else 0
+    # 全局总步数（用于调度器）= 每个进程的步数 (因为 scheduler.step() 在每个进程都调用)
+    optimizer_steps_per_epoch = local_steps_per_epoch
+
     num_training_steps = num_epochs * optimizer_steps_per_epoch
     num_warmup_steps = warmup_epochs * optimizer_steps_per_epoch
 
     if is_main_process:
-        logging.info(f"总 Epochs: {num_epochs}, 每个 Epoch 优化器步数: {optimizer_steps_per_epoch}")
-        logging.info(f"总步数: {num_training_steps}, Warmup 步数: {num_warmup_steps}")
+        logging.info(f"总 Epochs: {num_epochs}, 每个进程 Epoch 优化器步数: {optimizer_steps_per_epoch}")
+        logging.info(f"总步数 (用于调度器): {num_training_steps}, Warmup 步数: {num_warmup_steps}")
 
-    if num_warmup_steps > 0:
-        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
+    if optimizer_steps_per_epoch == 0:
+        if is_main_process:
+            logging.warning("每个 epoch 的优化器步数为 0 (可能是 dataloader 为空或 accumulation_steps 过大)。跳过调度器设置。")
+        scheduler = None # 没有步数，无法设置调度器
+    elif num_warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
         main_scheduler = CosineAnnealingLR(optimizer, T_max=max(1, num_training_steps - num_warmup_steps), eta_min=config['training']['eta_min'])
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
@@ -289,7 +325,8 @@ def train(config, args):
                  if unexpected: logging.warning(f"加载模型权重时意外: {unexpected}")
 
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            # 只有在调度器有效时才加载
+            if scheduler: scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             if 'scaler_state_dict' in checkpoint: scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_dice = checkpoint.get('best_dice', 0.0)
@@ -301,10 +338,15 @@ def train(config, args):
     # --- 训练循环 ---
     if is_main_process: logging.info(f"开始训练，从 Epoch {start_epoch + 1} 到 {num_epochs}...")
 
+    # 在循环外初始化 epoch 累积损失 (仅本地)
+    # epoch_losses = [] # 不再需要
+
     for epoch in range(start_epoch, num_epochs):
         if use_ddp: train_loader.sampler.set_epoch(epoch)
         model.train()
-        running_loss = 0.0
+        running_loss_local = 0.0 # 本地累加损失
+        num_local_steps = 0      # 本地实际执行的step数
+
         train_iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} Training", disable=(not is_main_process))
 
         for i, (images, targets, _) in enumerate(train_iterator): # 解包 slice_id
@@ -312,50 +354,79 @@ def train(config, args):
             targets = targets.to(device, non_blocking=True).long() # 确保是 Long
 
             is_sync_step = (i + 1) % accumulation_steps == 0 or (i + 1) == len(train_loader)
-            sync_context = contextlib.nullcontext() if (not use_ddp or is_sync_step) else model.no_sync()
+            # DDP forward pass should happen outside no_sync context if is_sync_step is True
+            # For simplicity, keep contextlib.nullcontext() when DDP is off or it's sync step
+            sync_context = contextlib.nullcontext() if not use_ddp or is_sync_step else model.no_sync()
 
-            with sync_context:
+
+            try:
+                # Forward pass outside no_sync context if is_sync_step
                 with autocast(dtype=torch.bfloat16):
                     logits = model(images)
                     loss = criterion(logits.float(), targets) # 全精度计算损失
                     loss = loss / accumulation_steps
 
+                # Backward pass might need to be within sync_context if not is_sync_step
+                # However, the example code does backward outside. Let's stick to that for now.
+                # If DDP issues arise (e.g., param not receiving grad), adjust this.
                 scaler.scale(loss).backward()
 
-            if is_sync_step:
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-                scheduler.step()
 
-            batch_loss = loss.item() * accumulation_steps
-            running_loss += batch_loss
+                if is_sync_step:
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                    if scheduler: scheduler.step() # 只有在 scheduler 有效时才 step
 
-            if is_main_process:
-                 train_iterator.set_postfix({'loss': f"{batch_loss:.4f}", 'lr': f"{optimizer.param_groups[0]['lr']:.6f}"})
+                    # 累加本地 batch 损失 (未标准化的)
+                    batch_loss_local = loss.item() * accumulation_steps
+                    running_loss_local += batch_loss_local
+                    num_local_steps += 1
 
-        # --- 同步计算平均训练损失 ---
-        if use_ddp:
-            total_loss_tensor = torch.tensor(running_loss, device=device)
-            dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
-            total_samples = torch.tensor(len(train_loader.dataset), device=device)
-            dist.all_reduce(total_samples, op=dist.ReduceOp.SUM) # 确保获取所有进程的样本总数
-            avg_train_loss = total_loss_tensor.item() / total_samples.item() if total_samples.item() > 0 else 0.0
-        else:
-            avg_train_loss = running_loss / len(train_loader.dataset) if len(train_loader.dataset) > 0 else 0.0
+                    # 更新 tqdm (仅主进程)
+                    if is_main_process:
+                        current_avg_loss_local = running_loss_local / num_local_steps if num_local_steps > 0 else 0.0
+                        train_iterator.set_postfix({
+                            'avg_loss (local)': f"{current_avg_loss_local:.4f}", # 标记为本地损失
+                            'lr': f"{optimizer.param_groups[0]['lr']:.6f}"
+                        })
+
+            except RuntimeError as e:
+                 if "CUDA out of memory" in str(e):
+                     if is_main_process:
+                         logging.error(f"训练期间 CUDA 内存不足！Epoch {epoch+1}, Batch {i+1}. Batch shape: {images.shape}. 尝试跳过。")
+                     torch.cuda.empty_cache()
+                     optimizer.zero_grad(set_to_none=True)
+                     continue
+                 else:
+                     if is_main_process:
+                         logging.error(f"训练期间发生错误: {e}", exc_info=True)
+                     # 移除 barrier
+                     raise e # 重新抛出错误
+
+        # --- 计算 Epoch 平均训练损失 (仅本地) ---
+        avg_train_loss_local = running_loss_local / num_local_steps if num_local_steps > 0 else 0.0
+
 
         # --- 评估 ---
-        if use_ddp: dist.barrier() # 确保所有进程完成训练步骤
-        val_loss, val_dice = evaluate(model, val_loader, criterion, device, epoch, args, num_classes)
+        # 移除 barrier
+        try:
+            val_loss, val_dice = evaluate(model, val_loader, criterion, device, epoch, args, num_classes)
+        except Exception as e:
+             if is_main_process:
+                 logging.error(f"评估 Epoch {epoch+1} 时出错: {e}", exc_info=True)
+             val_loss, val_dice = float('inf'), 0.0 # 设置默认值以继续流程
 
-        # --- 日志与检查点 ---
+
+        # --- 日志与检查点 (仅主进程) ---
         if is_main_process:
-            current_lr = optimizer.param_groups[0]['lr']
+            current_lr = optimizer.param_groups[0]['lr'] if optimizer.param_groups else 0.0
+            # 使用 evaluate 返回的本地 rank 0 的结果
             logging.info(
                 f"Epoch {epoch + 1}/{num_epochs} | "
-                f"Train Loss: {avg_train_loss:.4f} | "
-                f"Val Loss: {val_loss:.4f} | "
-                f"Val Dice (avg fg): {val_dice:.4f} | " # 明确是前景 Dice
+                f"Avg Train Loss (Rank 0): {avg_train_loss_local:.4f} | "
+                f"Val Loss (Rank 0): {val_loss:.4f} | " # 标记为 Rank 0
+                f"Val Dice (Rank 0, avg fg): {val_dice:.4f} | " # 标记为 Rank 0
                 f"LR: {current_lr:.6f}"
             )
 
@@ -375,10 +446,10 @@ def train(config, args):
             except Exception as e:
                 logging.error(f"保存最新检查点失败: {e}")
 
-            # 保存最佳模型
+            # 保存最佳模型 (基于 Rank 0 的 val_dice)
             if val_dice > best_dice:
                 best_dice = val_dice
-                logging.info(f"新最佳模型，Dice: {best_dice:.4f}. 保存中...")
+                logging.info(f"新最佳模型 (Rank 0)，Dice: {best_dice:.4f}. 保存中...")
                 best_checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
                 try:
                     torch.save((model.module if use_ddp else model).state_dict(), best_checkpoint_path)
@@ -387,7 +458,7 @@ def train(config, args):
 
     # --- 训练结束 ---
     if is_main_process:
-        logging.info(f'训练完成. 最佳验证 Dice (avg fg): {best_dice:.4f}')
+        logging.info(f'训练完成. 最佳验证 Dice (Rank 0, avg fg): {best_dice:.4f}')
 
     if use_ddp:
         dist.destroy_process_group()
