@@ -22,13 +22,11 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda.amp import GradScaler, autocast
 
-
 from model.unet import create_unet_model # 复用之前的 U-Net 工厂函数
 # 使用新的多类别损失函数
 from model.losses import DiceCELossMulti, mean_dice_score_multi
 # 使用新的 s8d 数据加载器
 from dataset.s8d import build_s8d_segmentation_dataloaders
-
 
 
 def setup_logging(output_dir, save_dir):
@@ -117,9 +115,13 @@ def visualize_predictions(epoch, output_dir, save_dir, images, targets, preds_lo
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_path = os.path.join(output_dir, save_dir, f"validation_epoch_{epoch+1}.png")
-    plt.savefig(save_path)
-    plt.close()
-    logging.info(f"验证结果可视化已保存至: {save_path}")
+    try:
+        plt.savefig(save_path)
+        plt.close()
+        logging.info(f"验证结果可视化已保存至: {save_path}")
+    except Exception as e:
+         logging.error(f"保存可视化图像失败: {e}")
+         plt.close() # Ensure figure is closed even on error
 
 
 def evaluate(model, val_loader, criterion, device, epoch, args, num_classes):
@@ -362,7 +364,7 @@ def train(config, args):
                 'epoch': epoch,
                 'model_state_dict': (model.module if use_ddp else model).state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None, # 保存 scheduler 状态
                 'scaler_state_dict': scaler.state_dict(),
                 'best_dice': best_dice,
                 'config': config,
