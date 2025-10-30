@@ -78,9 +78,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         
         for i, (images, labels) in enumerate(train_loader):
             
-            # *** 修复: 从这里移动 mark_step_begin ***
-            # torch.compiler.cudagraph_mark_step_begin()
-            
             is_accumulation_step = (i + 1) % accumulation_steps != 0
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
@@ -97,29 +94,29 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             with sync_context:
                 
                 # *** 修复: 将 mark_step_begin 移动到 *内部* ***
-                # 这可确保 CUDAGraphs 正确处理 DDP a/sync 
                 torch.compiler.cudagraph_mark_step_begin()
                 
-                # autocast bfloat16 是正确的
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     outputs = model(images)
+                    
+                    # *** 修复 (1/2): 立即克隆 outputs 以进行后续评估 ***
+                    # 这可以防止 CUDAGraphs 在下一次迭代中覆盖它
+                    outputs_for_eval = outputs.data.clone()
+                    
                     loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
                 
-                # *** 修改: 直接调用 backward() ***
-                # scaler.scale(loss).backward()
                 loss.backward()
 
             if not is_accumulation_step:
-                # *** 修改: 直接调用 step() ***
-                # scaler.step(optimizer)
                 optimizer.step()
-                # scaler.update() # 移除
                 optimizer.zero_grad(set_to_none=True)
                 if scheduler and not config['training']['use_postrain']: scheduler.step()
                 
             # --- 之后的评估逻辑保持不变 ---
-            _, predicted = torch.max(outputs.data, 1)
+            
+            # *** 修复 (2/2): 使用克隆的张量进行评估 ***
+            _, predicted = torch.max(outputs_for_eval, 1)
             running_total += original_labels.size(0)
             running_corrects += (predicted == original_labels).sum().item()
             running_loss += loss.item() * accumulation_steps
@@ -177,6 +174,11 @@ def evaluate_model_compatible(model, val_loader, device, is_ddp=False):
         # 验证时继续使用 bfloat16
         with autocast(device_type='cuda', dtype=torch.bfloat16):
             for images, labels in val_loader:
+                
+                # *** 修复: 为验证循环添加 mark_step_begin ***
+                # CUDAGraphs 也会捕获评估循环
+                torch.compiler.cudagraph_mark_step_begin()
+                
                 images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
                 outputs = model(images)
                 _, predicted = torch.max(outputs.data, 1)
