@@ -4,6 +4,7 @@ import yaml
 import logging
 import argparse
 import contextlib
+import torch.compiler
 
 import torch
 from torch import nn
@@ -74,6 +75,9 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         running_loss, running_corrects, running_total = 0.0, 0, 0
         
         for i, (images, labels) in enumerate(train_loader):
+            
+            torch.compiler.cudagraph_mark_step_begin()
+            
             is_accumulation_step = (i + 1) % accumulation_steps != 0
             images = images.to(device_id, non_blocking=True)
             labels = labels.to(device_id, non_blocking=True)
