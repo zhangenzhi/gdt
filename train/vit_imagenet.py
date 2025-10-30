@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, MultiStepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import GradScaler, autocast 
-
+from torch.profiler import profile, record_function, ProfilerActivity
 
 # Import the baseline ViT model and the dataset functions
 sys.path.append("./")
