@@ -100,8 +100,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                     outputs = model(images)
                     
                     # *** 修复 (1/2): 立即克隆 outputs 以进行后续评估 ***
-                    # 这可以防止 CUDAGraphs 在下一次迭代中覆盖它
-                    outputs_for_eval = outputs.data.clone()
+                    # 更改: .data.clone() -> .clone().detach() (更安全)
+                    outputs_for_eval = outputs.clone().detach()
                     
                     loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
@@ -310,7 +310,11 @@ def vit_imagenet_train_single(args, config):
         
     if config['training'].get('use_compile', False):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
-        model = torch.compile(model, mode="max-autotune", dynamic=True)
+        
+        # *** 修复: 从 'max-autotune' 回退到 'default' ***
+        # 'max-autotune' 启用 CUDAGraphs，这导致了内存覆盖错误.
+        # 'default' 仍然会融合 FA2，但对 CUDAGraphs 不那么激进.
+        model = torch.compile(model, mode="default")
         
     if device.type == 'cuda' or world_size > 1:
         if device.type == 'cuda':
