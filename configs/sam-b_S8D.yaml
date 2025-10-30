@@ -6,8 +6,8 @@ task_name: "sam_b_s8d_run"
 model:
   # SAM variant 会根据 img_size 自动计算 patch_size 和 in_chans
   img_size: 8192 # 调整输入尺寸以适应显存
-  target_patch_grid_size: 32 # 512 / 32 = patch_size 16
-  pretrained: True # 加载 SAM 编码器权重
+  target_patch_grid_size: 64 # 512 / 32 = patch_size 16
+  pretrained: False # 加载 SAM 编码器权重
   num_classes: 5 # s8d 有 5 个类别
   # SAM 解码器通道配置 (可以调整)
   decoder_channels: [128, 64, 32, 16]
