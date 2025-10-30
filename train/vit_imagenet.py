@@ -47,8 +47,11 @@ def setup_logging(args):
     )
 
 def train_vit_model(model, train_loader, val_loader, criterion, optimizer, scheduler, config, device_id, args, start_epoch, best_val_acc=0.0, is_ddp=False):
-    # 1. 初始化 GradScaler
-    scaler = GradScaler(enabled=True)
+    
+    # *** 移除 SCALER ***
+    # GradScaler 仅用于 float16，不用于 bfloat16
+    # scaler = GradScaler(enabled=True) 
+    
     num_epochs = config['training']['num_epochs']
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
     mixup_fn = Mixup(
@@ -59,12 +62,11 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         switch_prob=0.5        # mixup vs cutmix 切换概率
     )
     
-    # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
     is_main_process = not is_ddp or (is_ddp and dist.get_rank() == 0)
 
     if is_main_process:
         logging.info("Starting ViT training for %d epochs with Automatic Mixed Precision (AMP)...", num_epochs)   
-        logging.info("开始BF16优化训练...")
+        logging.info("开始BF16优化训练 (注意: GradScaler 已为 BF16 禁用)...") # 更新日志
         logging.info(f"torch.compile: {config['training'].get('use_compile', False)}, Fused Optimizer: {config['training'].get('use_fused_optimizer', False)}, Activation Checkpointing: {config['training'].get('use_checkpointing', False)}")
         logging.info(f"将从 Epoch {start_epoch + 1} 开始训练...")
         
@@ -76,6 +78,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         
         for i, (images, labels) in enumerate(train_loader):
             
+            # 这是正确的，为 torch.compile CUDAGraphs 保留
             torch.compiler.cudagraph_mark_step_begin()
             
             is_accumulation_step = (i + 1) % accumulation_steps != 0
@@ -83,7 +86,7 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             labels = labels.to(device_id, non_blocking=True)
             
             original_labels = labels.clone()
-            # *** 修改: 应用Mixup/CutMix ***
+            
             if config['training']['use_mixup']:
                 images, soft_labels = mixup_fn(images, labels)
             else:
@@ -92,16 +95,21 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
             
             with sync_context:
+                # autocast bfloat16 是正确的
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     outputs = model(images)
                     loss = criterion(outputs, soft_labels)
                     loss = loss / accumulation_steps
                 
-                scaler.scale(loss).backward()
+                # *** 修改: 直接调用 backward() ***
+                # scaler.scale(loss).backward()
+                loss.backward()
 
             if not is_accumulation_step:
-                scaler.step(optimizer)
-                scaler.update()
+                # *** 修改: 直接调用 step() ***
+                # scaler.step(optimizer)
+                optimizer.step()
+                # scaler.update() # 移除
                 optimizer.zero_grad(set_to_none=True)
                 if scheduler and not config['training']['use_postrain']: scheduler.step()
                 
@@ -109,7 +117,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             _, predicted = torch.max(outputs.data, 1)
             running_total += original_labels.size(0)
             running_corrects += (predicted == original_labels).sum().item()
-            # 注意：loss.item() 会自动返回未缩放的、float32类型的损失值
             running_loss += loss.item() * accumulation_steps
 
             if (i + 1) % 10 == 0 and is_main_process:
@@ -119,7 +126,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Train Loss: {avg_loss:.3f}, Train Acc: {train_acc:.2f}%, current_lr: {current_lr:.6f}')
                 running_loss, running_corrects, running_total = 0.0, 0, 0
 
-        # 调用兼容性更强的评估函数
         val_acc = evaluate_model_compatible(
             model, 
             val_loader, 
@@ -131,11 +137,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             current_lr = optimizer.param_groups[0]['lr']
             logging.info(f"Epoch {epoch + 1}/{num_epochs} | Val Acc: {val_acc:.4f} | current_lr: {current_lr:.6f}")
             
-            # *** 修改: 完整的检查点保存逻辑 ***
             checkpoint_dir = os.path.join(args.output, args.savefile)
-            # checkpoint_path = os.path.join(args.output, args.savefile, "best_model.pth")
             
-            # 总是保存最新的检查点
             latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_checkpoint.pth")
             torch.save({
                 'epoch': epoch,
@@ -145,7 +148,6 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
                 'best_val_acc': best_val_acc,
             }, latest_checkpoint_path)
 
-            # 如果是最佳模型，则另外保存一份
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 logging.info(f"新的最佳验证精度: {best_val_acc:.4f}. 保存最佳模型...")
@@ -167,6 +169,7 @@ def evaluate_model_compatible(model, val_loader, device, is_ddp=False):
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
+        # 验证时继续使用 bfloat16
         with autocast(device_type='cuda', dtype=torch.bfloat16):
             for images, labels in val_loader:
                 images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
@@ -192,7 +195,7 @@ def setup_ddp(rank, world_size):
     dist.init_process_group(backend='nccl', init_method='env://')
     
 def vit_imagenet_train(args, config):
-    """Main DDP training function for the baseline ViT."""
+    """(SLURM) Main DDP training function for the baseline ViT."""
     rank = int(os.environ['SLURM_PROCID'])
     world_size = int(os.environ['SLURM_NTASKS'])
     setup_ddp(rank, world_size)
@@ -231,45 +234,35 @@ def vit_imagenet_train(args, config):
             lr=config['training']['learning_rate'], 
             weight_decay=config['training']['weight_decay'],
             betas=tuple(config['training'].get('betas', (0.9, 0.95))),
-            fused=use_fused # 在CUDA上可用时自动启用融合内核
+            fused=use_fused
         )
         
-    # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
     training_config = config['training']
     num_epochs = training_config['num_epochs']
     warmup_epochs = training_config.get('warmup_epochs', 0)
     
-    # 计算总的训练步数和预热步数
     steps_per_epoch = len(dataloaders['train'])
     num_training_steps = num_epochs * steps_per_epoch
     num_warmup_steps = warmup_epochs * steps_per_epoch
     
     if num_warmup_steps > 0:
-        # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=num_warmup_steps)
-        # 主调度器：在预热结束后，进行余弦退火
         main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
-        # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
-        # 如果不使用预热，则只使用余弦退火
         scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
         
-    # *** 新增: 完整的检查点加载逻辑 ***
     start_epoch = 0
     best_val_acc = 0.0
     checkpoint_dir = os.path.join(args.output, args.savefile)
     checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
-    # checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
 
     if args.reload and os.path.exists(checkpoint_path):
         if dist.get_rank() == 0:
             logging.info(f"从检查点恢复训练: {checkpoint_path}")
         
-        # 加载到CPU以避免GPU内存冲突，并确保所有进程加载相同的权重
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         
-        # 加载模型权重 (注意要加载到 model.module)
         model.module.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -284,10 +277,10 @@ def vit_imagenet_train(args, config):
     dist.destroy_process_group()
 
 def vit_imagenet_train_single(args, config):
-    # torchrun 会自动设置 'LOCAL_RANK' 等环境变量
+    # (torchrun)
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
-    backend = 'nccl'  # 使用GPU
+    backend = 'nccl'
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
     
@@ -327,54 +320,41 @@ def vit_imagenet_train_single(args, config):
     use_fused = config['training'].get('use_fused_optimizer', False)
     optimizer = torch.optim.AdamW(
         param_groups,
-        # model.parameters(),
         lr=config['training']['learning_rate'], 
         weight_decay=config['training']['weight_decay'],
         betas=tuple(config['training'].get('betas', (0.9, 0.95))),
-        fused=use_fused, # 在CUDA上可用时自动启用融合内核
+        fused=use_fused,
         amsgrad=False
     )
     
-     # *** 修改: 创建包含线性预热和余弦退火的组合调度器 ***
     training_config = config['training']
     num_epochs = training_config['num_epochs']
-    warmup_epochs = training_config.get('warmup_epochs', 0) # 这里会得到 20
-
-    # 从配置中获取梯度累积步数
-    accumulation_steps = training_config.get('gradient_accumulation_steps', 1) # 这里会得到 4
+    warmup_epochs = training_config.get('warmup_epochs', 0) 
+    accumulation_steps = training_config.get('gradient_accumulation_steps', 1) 
     optimizer_steps_per_epoch = len(dataloaders['train']) // accumulation_steps
 
-    # 基于“优化器更新次数”来计算总步数和预热步数
     num_training_steps = num_epochs * optimizer_steps_per_epoch
-    num_warmup_steps = warmup_epochs * optimizer_steps_per_epoch # 这里会是 20 * (len(loader)/4)
+    num_warmup_steps = warmup_epochs * optimizer_steps_per_epoch
 
     
     if num_warmup_steps > 0:
-        # 预热调度器：从一个很小的值线性增长到1
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=num_warmup_steps)
-        # 主调度器：在预热结束后，进行余弦退火
         main_scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=1e-6)
-        # 使用SequentialLR将两者串联起来
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[num_warmup_steps])
     else:
-        # 如果不使用预热，则只使用余弦退火
         scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps)
     
-    # *** 新增: 完整的检查点加载逻辑 ***
     start_epoch = 0
     best_val_acc = 0.0
     checkpoint_dir = os.path.join(args.output, args.savefile)
     checkpoint_path = os.path.join(checkpoint_dir, "best_model.pth")
-    # checkpoint_path = os.path.join(args.output, config['model'].get('savefile', 'vit_run'), "latest_checkpoint.pth")
 
     if args.reload and os.path.exists(checkpoint_path):
         if dist.get_rank() == 0:
             logging.info(f"从检查点恢复训练: {checkpoint_path}")
         
-        # 加载到CPU以避免GPU内存冲突，并确保所有进程加载相同的权重
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         
-        # 加载模型权重 (注意要加载到 model.module)
         model.module.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -397,19 +377,16 @@ if __name__ == "__main__":
     parser.add_argument('--output', type=str, default='./output', help='Base output directory')
     parser.add_argument('--savefile', type=str, default='vit-b-16-he-timm-pz4-fa2', help='Subdirectory for saving logs and models')
     # parser.add_argument('--data_dir', type=str, default="/lustre/orion/nro108/world-shared/enzhi/gdt/dataset", help='Path to the ImageNet dataset directory')
-    parser.add_argument('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
+    parser.add_button('--data_dir', type=str, default="/work/c30636/dataset/imagenet/", help='Path to the ImageNet dataset directory')
     parser.add_argument('--num_workers', type=int, default=32, help='Number of workers for DataLoader')
-    # Use action='store_true' for boolean flags
     parser.add_argument('--reload', action='store_true', help='Resume training from the best checkpoint if it exists')
     parser.add_argument('--local', action='store_true', help='Run training locally without DDP')
     
     args = parser.parse_args()
     
-    # Load config from YAML file
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
-    # Update args from config for consistency
     args.img_size = config['model']['img_size']
     args.num_epochs = config['training']['num_epochs']
     args.batch_size = config['training']['batch_size']
@@ -418,5 +395,3 @@ if __name__ == "__main__":
     os.makedirs(args.output, exist_ok=True)
     
     vit_imagenet_train_single(args, config)
-    
-    
