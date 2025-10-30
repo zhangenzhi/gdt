@@ -22,8 +22,8 @@ training:
   eta_min: 0.000001
 
   num_epochs: 100
-  batch_size: 8 # SAM 可能也需要较小 batch size
-  gradient_accumulation_steps: 1
+  batch_size: 1 # SAM 可能也需要较小 batch size
+  gradient_accumulation_steps: 8
 
   use_compile: False
 
