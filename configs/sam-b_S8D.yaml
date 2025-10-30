@@ -1,52 +1,39 @@
-# Configuration for the SAM-B Segmentation Model
+# Configuration for SAM-B Variant on S8D Segmentation
 
-# A name for this specific experiment run, used for creating output directories
-task_name: "sam_b_seg_1k_run"
+task_name: "sam_b_s8d_run"
 
 # 1. Model Configuration
 model:
-  # img_size determines patch_size calculation and in_chans (1024 -> 1 chan)
-  img_size: 1024
-  # Target grid size for the Transformer blocks (SAM-B standard is 64x64)
-  target_patch_grid_size: 64
-  # Whether to load pretrained SAM encoder weights
-  pretrained: True
-  # Number of output classes for segmentation (1 for binary)
-  num_classes: 1
-  # Channels configuration for the segmentation decoder
+  # SAM variant 会根据 img_size 自动计算 patch_size 和 in_chans
+  img_size: 8192 # 调整输入尺寸以适应显存
+  target_patch_grid_size: 32 # 512 / 32 = patch_size 16
+  pretrained: True # 加载 SAM 编码器权重
+  num_classes: 5 # s8d 有 5 个类别
+  # SAM 解码器通道配置 (可以调整)
   decoder_channels: [128, 64, 32, 16]
 
 # 2. Training Hyperparameters
 training:
   optimizer: "AdamW"
-  # Learning rate might need tuning for SAM fine-tuning
   learning_rate: 0.0001
-  # Betas for AdamW optimizer
   betas: [0.9, 0.999]
   weight_decay: 0.05
   warmup_epochs: 5
-  # Minimum learning rate for cosine annealing
   eta_min: 0.000001
 
   num_epochs: 100
-  # Batch size per GPU (adjust based on H100 memory)
-  batch_size: 2 # SAM-B might require smaller batch size than ResNet UNet
-  # Accumulate gradients over N steps before updating weights
+  batch_size: 8 # SAM 可能也需要较小 batch size
   gradient_accumulation_steps: 1
 
-  # Use torch.compile for JIT compilation (requires PyTorch 2.0+)
   use_compile: False
 
 # 3. Data Configuration
 data:
-  # Root directory path of the dataset (can be overridden by command line)
-  data_dir: '/work/c30636/dataset/hydrogel-s'
-  # Number of worker processes for DataLoader
+  # !! 修改为您的 s8d 数据集切片目录 !!
+  data_dir: '/work/c30636/dataset/s8d/finetune/Noise_1_Blur_2_sparsity_2_NumAng_3600/'
   num_workers: 8
 
 # 4. Output Configuration
 output:
-  # Base directory for saving results (can be overridden by command line)
   base_dir: './output'
-  # Specific folder name for this run (can be overridden, also used as task_name)
-  save_dir: 'sam_b_seg_1k_run'
+  save_dir: 'sam_b_s8d_run'
