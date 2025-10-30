@@ -22,24 +22,11 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda.amp import GradScaler, autocast
 
-# --- 导入我们自己的模块 ---
-try:
-    # !! 修改: 导入 SAM 模型 !!
-    from model.sam_model import create_sam_b_variant
-    from model.losses_multi import DiceCELossMulti, mean_dice_score_multi # 使用多类别损失
-    from dataset.s8d_dataloader import build_s8d_segmentation_dataloaders # 使用 s8d 加载器
-except ImportError as e:
-    print("导入错误: 请确保您的项目文件结构包含:")
-    print("project_root/")
-    print("├── model/")
-    print("│   ├── sam_model.py")
-    print("│   └── losses_multi.py")
-    print("├── dataset/")
-    print("│   └── s8d_dataloader.py")
-    print("└── train/")
-    print("    └── sam_s8d_train.py (此脚本)")
-    print(f"原始错误: {e}")
-    sys.exit(1)
+
+# !! 修改: 导入 SAM 模型 !!
+from model.sam import create_sam_b_variant
+from model.losses import DiceCELossMulti, mean_dice_score_multi # 使用多类别损失
+from dataset.s8d import build_s8d_segmentation_dataloaders # 使用 s8d 加载器
 
 
 def setup_logging(output_dir, save_dir):
