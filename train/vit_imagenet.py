@@ -78,8 +78,8 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
         
         for i, (images, labels) in enumerate(train_loader):
             
-            # 这是正确的，为 torch.compile CUDAGraphs 保留
-            torch.compiler.cudagraph_mark_step_begin()
+            # *** 修复: 从这里移动 mark_step_begin ***
+            # torch.compiler.cudagraph_mark_step_begin()
             
             is_accumulation_step = (i + 1) % accumulation_steps != 0
             images = images.to(device_id, non_blocking=True)
@@ -95,6 +95,11 @@ def train_vit_model(model, train_loader, val_loader, criterion, optimizer, sched
             sync_context = model.no_sync() if (is_ddp and is_accumulation_step) else contextlib.nullcontext()
             
             with sync_context:
+                
+                # *** 修复: 将 mark_step_begin 移动到 *内部* ***
+                # 这可确保 CUDAGraphs 正确处理 DDP a/sync 
+                torch.compiler.cudagraph_mark_step_begin()
+                
                 # autocast bfloat16 是正确的
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
                     outputs = model(images)
@@ -395,3 +400,4 @@ if __name__ == "__main__":
     os.makedirs(args.output, exist_ok=True)
     
     vit_imagenet_train_single(args, config)
+
