@@ -306,7 +306,7 @@ def vit_imagenet_train_single(args, config):
         
     if config['training'].get('use_compile', False):
         if dist.get_rank() == 0: logging.info("正在应用 torch.compile()...")
-        model = torch.compile(model)
+        model = torch.compile(model, mode="max-autotune")
         
     if device.type == 'cuda' or world_size > 1:
         if device.type == 'cuda':
