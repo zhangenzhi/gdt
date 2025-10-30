@@ -6,7 +6,7 @@ task_name: "vit_imagenet_local"
 # 1. Model Architecture Configuration
 model:
   img_size: 224
-  patch_size: 4
+  patch_size: 2
   in_channels: 3
   embed_dim: 768
   depth: 12
@@ -28,11 +28,11 @@ training:
   eta_min: 0.000001
 
   num_epochs: 300
-  batch_size: 64 # batch per node
+  batch_size: 16 # batch per node
 
   use_compile: true                # 推荐：开启模型编译
   use_fused_optimizer: true        # 推荐：开启融合优化器
   use_mixup: true
   use_fp8: False
   use_postrain: False
-  gradient_accumulation_steps: 16
+  gradient_accumulation_steps: 64
