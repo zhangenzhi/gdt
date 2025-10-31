@@ -25,7 +25,7 @@ training:
   eta_min: 0.000001
 
   num_epochs: 100
-  batch_size: 4 # UNETR 可能需要更小的 batch size
+  batch_size: 2 # UNETR 可能需要更小的 batch size
   gradient_accumulation_steps: 1
 
   use_compile: False
@@ -34,7 +34,7 @@ training:
 data:
   # !! 修改为您的 s8d 数据集切片目录 !!
   data_dir: '/work/c30636/dataset/s8d/finetune/Noise_1_Blur_2_sparsity_2_NumAng_3600/'
-  num_workers: 8
+  num_workers: 1
 
 # 4. Output Configuration
 output:
