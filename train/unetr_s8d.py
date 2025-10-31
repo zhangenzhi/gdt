@@ -328,7 +328,7 @@ def train(config, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UNETR-2D S8D Segmentation Training Script")
-    parser.add_argument('--config', type=str, default='./configs/unetr_s8d.yaml', help='配置文件路径') # 默认 UNETR S8D 配置
+    parser.add_argument('--config', type=str, default='./configs/unetr_S8D.yaml', help='配置文件路径') # 默认 UNETR S8D 配置
     parser.add_argument('--data_dir', type=str, default=None, help='数据集目录 (覆盖配置)')
     parser.add_argument('--output', type=str, default=None, help='输出根目录 (覆盖配置)')
     parser.add_argument('--savefile', type=str, default=None, help='保存文件夹名 (覆盖配置)')
