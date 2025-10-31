@@ -2,11 +2,11 @@
 
 task_name: "unetr_vit_base_s8d_run"
 
-# 1. Model Configuration
 model:
-  backbone_name: 'vit_base_patch16_224' # 可以尝试 vit_small 或 vit_tiny 以节省显存
+  backbone_name: 'vit_base_patch16_224' # 基础骨干网络
   pretrained: False
-  img_size: 8192 # 调整输入尺寸以适应显存
+  img_size: 8192 # **修改点**: 设为 8k 分辨率
+  target_patch_grid_size: 64 # **新增**: 目标网格大小 (8192 / 64 = 128 patch_size)
   in_chans: 1 # s8d 是单通道
   num_classes: 5 # s8d 有 5 个类别
 

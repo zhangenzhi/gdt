@@ -189,6 +189,7 @@ def train(config, args):
         in_chans=config['model']['in_chans'],
         num_classes=config['model']['num_classes'],
         pretrained=config['model']['pretrained'],
+        target_patch_grid_size=config['model']['target_patch_grid_size'],
         feature_indices=tuple(config['model']['feature_indices']),
         decoder_channels=tuple(config['model']['decoder_channels'])
     ).to(device)
