@@ -1,0 +1,42 @@
+# Configuration for UNETR-2D on S8D Segmentation
+
+task_name: "unetr_vit_base_s8d_run"
+
+# 1. Model Configuration
+model:
+  backbone_name: 'vit_base_patch16_224' # 可以尝试 vit_small 或 vit_tiny 以节省显存
+  pretrained: False
+  img_size: 8192 # 调整输入尺寸以适应显存
+  in_chans: 1 # s8d 是单通道
+  num_classes: 5 # s8d 有 5 个类别
+
+  # ViT-Base (depth 12) 的特征索引
+  feature_indices: [2, 5, 8, 11]
+  # 解码器通道
+  decoder_channels: [256, 128, 64, 32]
+
+# 2. Training Hyperparameters
+training:
+  optimizer: "AdamW"
+  learning_rate: 0.0001
+  betas: [0.9, 0.999]
+  weight_decay: 0.05
+  warmup_epochs: 5
+  eta_min: 0.000001
+
+  num_epochs: 100
+  batch_size: 8 # UNETR 可能需要更小的 batch size
+  gradient_accumulation_steps: 1
+
+  use_compile: False
+
+# 3. Data Configuration
+data:
+  # !! 修改为您的 s8d 数据集切片目录 !!
+  data_dir: '/work/c30636/dataset/s8d/finetune/Noise_1_Blur_2_sparsity_2_NumAng_3600/'
+  num_workers: 8
+
+# 4. Output Configuration
+output:
+  base_dir: './output'
+  save_dir: 'unetr_vit_base_s8d_run'
