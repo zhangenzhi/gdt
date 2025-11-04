@@ -100,10 +100,10 @@ def get_transforms(img_size, mean, std, is_train=True):
             #     A.GridDistortion(p=0.3),
             #     A.OpticalDistortion(p=0.3)
             # ], p=0.3),
-            # A.OneOf([
-            #     A.RandomBrightnessContrast(p=0.5),
-            #     A.RandomGamma(p=0.5),
-            # ], p=0.5),
+            A.OneOf([
+                A.RandomBrightnessContrast(p=0.5),
+                A.RandomGamma(p=0.5),
+            ], p=1.0),
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
         ])
@@ -122,7 +122,8 @@ def create_dataloaders(data_dir, img_size, batch_size, num_workers=4, use_ddp=Fa
     mask_dir = os.path.join(data_dir, 'masks-hydrogel')
     all_image_paths = sorted(glob(os.path.join(image_dir, '*/*.jpg')))
     
-    val_specific_img = os.path.join(image_dir, '1301100nm', '19.jpg')
+    # val_specific_img = os.path.join(image_dir, '1301100nm', '19.jpg')
+    val_specific_img = os.path.join(image_dir, '1301100nm', '1.jpg')
     if val_specific_img not in all_image_paths:
         raise FileNotFoundError(f"指定的验证图片未找到: {val_specific_img}")
 
