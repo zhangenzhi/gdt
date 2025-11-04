@@ -101,8 +101,8 @@ def get_transforms(img_size, mean, std, is_train=True):
             #     A.OpticalDistortion(p=0.3)
             # ], p=0.3),
             A.OneOf([
-                A.RandomBrightnessContrast(p=0.5),
-                A.RandomGamma(p=0.5),
+                A.RandomBrightnessContrast(p=1.0),
+                A.RandomGamma(p=1.0),
             ], p=1.0),
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
