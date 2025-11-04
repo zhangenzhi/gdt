@@ -91,10 +91,10 @@ def get_transforms(img_size, mean, std, is_train=True):
     if is_train:
         return A.Compose([
             A.Resize(img_size, img_size),
-            # A.HorizontalFlip(p=0.5),
-            # A.VerticalFlip(p=0.5),
-            # A.RandomRotate90(p=0.5),
-            # A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
             A.OneOf([
                 A.ElasticTransform(p=0.3),
                 A.GridDistortion(p=0.3),
