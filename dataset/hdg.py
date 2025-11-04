@@ -95,11 +95,11 @@ def get_transforms(img_size, mean, std, is_train=True):
             # A.VerticalFlip(p=0.5),
             # A.RandomRotate90(p=0.5),
             # A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
-            # A.OneOf([
-            #     A.ElasticTransform(p=0.3),
-            #     A.GridDistortion(p=0.3),
-            #     A.OpticalDistortion(p=0.3)
-            # ], p=0.3),
+            A.OneOf([
+                A.ElasticTransform(p=0.3),
+                A.GridDistortion(p=0.3),
+                A.OpticalDistortion(p=0.3)
+            ], p=0.3),
             A.OneOf([
                 A.RandomBrightnessContrast(p=0.5),
                 A.RandomGamma(p=0.5),
