@@ -91,19 +91,19 @@ def get_transforms(img_size, mean, std, is_train=True):
     if is_train:
         return A.Compose([
             A.Resize(img_size, img_size),
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
-            A.OneOf([
-                A.ElasticTransform(p=0.3),
-                A.GridDistortion(p=0.3),
-                A.OpticalDistortion(p=0.3)
-            ], p=0.3),
-            A.OneOf([
-                A.RandomBrightnessContrast(p=0.5),
-                A.RandomGamma(p=0.5),
-            ], p=0.5),
+            # A.HorizontalFlip(p=0.5),
+            # A.VerticalFlip(p=0.5),
+            # A.RandomRotate90(p=0.5),
+            # A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
+            # A.OneOf([
+            #     A.ElasticTransform(p=0.3),
+            #     A.GridDistortion(p=0.3),
+            #     A.OpticalDistortion(p=0.3)
+            # ], p=0.3),
+            # A.OneOf([
+            #     A.RandomBrightnessContrast(p=0.5),
+            #     A.RandomGamma(p=0.5),
+            # ], p=0.5),
             A.Normalize(mean=(mean,), std=(std,)),
             ToTensorV2(),
         ])
@@ -184,7 +184,7 @@ if __name__ == '__main__':
     # 更新为您的数据路径和参数
     DATA_DIR = '/work/c30636/dataset/hydrogel-s'
     IMG_SIZE = 1024
-    BATCH_SIZE = 4 # 1024x1024图像较大，可以适当减小batch size以防内存不足
+    BATCH_SIZE = 32 # 1024x1024图像较大，可以适当减小batch size以防内存不足
 
     if not os.path.exists(DATA_DIR):
         print(f"错误: 数据目录 '{DATA_DIR}' 不存在。请修改 DATA_DIR 变量。")
@@ -203,7 +203,7 @@ if __name__ == '__main__':
         print("\n--- 可视化测试 ---")
         print("正在为第一个批次生成可视化结果...")
 
-        num_to_show = min(BATCH_SIZE, 4) # 最多显示4张图
+        num_to_show = min(BATCH_SIZE, 32) # 最多显示4张图
         fig, axes = plt.subplots(num_to_show, 2, figsize=(10, num_to_show * 5))
         if num_to_show == 1:
             axes = np.array([axes])
