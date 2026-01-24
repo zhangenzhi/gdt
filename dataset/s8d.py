@@ -10,6 +10,7 @@ from tqdm import tqdm
 import logging
 from typing import List, Optional # For type hinting
 import sys # For sys.exit
+import argparse
 
 _logger = logging.getLogger(__name__)
 
@@ -493,22 +494,15 @@ def build_s8d_segmentation_dataloaders(data_dir, batch_size, num_workers, img_si
     return {'train': train_loader, 'val': val_loader}
 
 
-# --- 本地测试 (仅在直接运行此脚本时执行) ---
-if __name__ == '__main__':
+def test_s8d_dataloaders(data_dir, img_size=8192, batch_size=1, num_workers=2, use_ddp_test=False):
+    """测试 S8D 数据加载器的封装函数。"""
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(description="S8D Dataloader Test")
-    parser.add_argument('--data_dir', type=str, required=True, help='Path to the s8d slice directory containing slice_manifest.csv')
-    parser.add_argument('--img_size', type=int, default=8192, help='Target image size for resizing during test') # Default to 8k
-    parser.add_argument('--batch_size', type=int, default=1, help='Batch size for testing (keep low for 8k)')
-    parser.add_argument('--num_workers', type=int, default=2, help='Number of workers for testing')
-    parser.add_argument('--use_ddp_test', action='store_true', help='Simulate DDP environment (single process)')
-    args = parser.parse_args()
 
-    DATA_DIR = args.data_dir
-    BATCH_SIZE = args.batch_size
-    NUM_WORKERS = args.num_workers
-    IMG_SIZE_TEST = args.img_size
-    use_ddp_test = args.use_ddp_test
+    DATA_DIR = data_dir
+    BATCH_SIZE = batch_size
+    NUM_WORKERS = num_workers
+    IMG_SIZE_TEST = img_size
+    use_ddp_test = use_ddp_test
 
     # 模拟 DDP 环境 (单进程)
     if use_ddp_test:
@@ -602,4 +596,22 @@ if __name__ == '__main__':
 
     if use_ddp_test and dist.is_initialized():
         dist.destroy_process_group()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="S8D Dataloader Test")
+    parser.add_argument('--data_dir', type=str, required=True, help='Path to the s8d slice directory containing slice_manifest.csv')
+    parser.add_argument('--img_size', type=int, default=8192, help='Target image size for resizing during test') # Default to 8k
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size for testing (keep low for 8k)')
+    parser.add_argument('--num_workers', type=int, default=2, help='Number of workers for testing')
+    parser.add_argument('--use_ddp_test', action='store_true', help='Simulate DDP environment (single process)')
+    args = parser.parse_args()
+
+    test_s8d_dataloaders(
+        data_dir=args.data_dir,
+        img_size=args.img_size,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        use_ddp_test=args.use_ddp_test
+    )
 
