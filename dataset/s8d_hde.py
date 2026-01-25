@@ -38,7 +38,7 @@ class HDEPretrainDataset(Dataset):
         
         self.normalize = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5]) 
+            # transforms.Normalize(mean=[0.5], std=[0.5]) # 可选归一化
         ])
 
         print(f"Dataset initialized. Found {len(self.image_files)} images.")
@@ -160,7 +160,7 @@ if __name__ == "__main__":
             imgs_done = (i + 1) * BATCH_SIZE
             speed = imgs_done / elapsed if elapsed > 0 else 0
             print(f"Batch [{i}/{len(loader)}] - Speed: {speed:.2f} img/s - Total processed (workers): {processed_counter.value}")
-        time.sleep(4)  # 模拟一些处理时间
+        time.sleep(0.5)  # 模拟一些处理时间
 
     t_epoch_end = time.time()
     total_time = t_epoch_end - t_epoch_start
