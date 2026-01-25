@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # 建议减少 workers 数量，对于 8K 大图处理，过多的 workers 会导致 CPU/内存带宽竞争
     # 32 workers * 8K image processing = 严重卡顿
     BATCH_SIZE = 32
-    NUM_WORKERS = 16 # 建议改为 8 或 16
+    NUM_WORKERS = 4  # <---【修改这里】建议改为 4 或 8，给主进程留出 CPU 资源
     PREFETCH = 2     # 默认是2，即总共预取 2 * NUM_WORKERS 个样本
     
     # 使用 multiprocessing.Value 创建一个跨进程的共享整数计数器 'i'
