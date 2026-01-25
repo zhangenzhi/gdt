@@ -119,7 +119,7 @@ def get_hde_dataloader(data_root, batch_size=4, num_workers=4):
 if __name__ == "__main__":
     ROOT = "/work/c30636/dataset/spring8concrete/Resize_8192_output_1" 
     
-    print("=== Visualizing One Batch ===")
+    print("=== Visualizing One Batch & Statistics ===")
     BATCH_SIZE = 4
     
     loader = get_hde_dataloader(ROOT, batch_size=BATCH_SIZE, num_workers=4)
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     masks = batch['mask']                # [B, Seq]
     file_paths = batch['file_path']      # list of paths
     
-    print(f"Batch Loaded. Visualizing first sample...")
+    print(f"Batch Loaded. Visualizing first sample and calculating stats...")
     
     # --- Visualization Parameters ---
     VIS_SIZE = 8192 # Size of the visualization canvas
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         
         # 【新增】: 膨胀边缘，防止在 resize 时消失
         # 8K图片线条太细，resize到2K时如果不加粗，插值后会变成几乎看不见的灰色
-        kernel = np.ones((3,3), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
+        kernel = np.ones((5,5), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
         edges_dilated = cv2.dilate(edges_full, kernel, iterations=1)
         
         # 缩放到可视化尺寸
@@ -172,52 +172,91 @@ if __name__ == "__main__":
     
     seq_len = pixel_values.shape[1]
     
-    for i in range(seq_len):
-        # Get patch data (1, 8, 8) -> (8, 8)
-        patch_tensor = pixel_values[sample_idx, i, 0] 
-        patch_img = (patch_tensor.numpy() * 255).astype(np.uint8)
-        
-        # Get coordinates (normalized 0-1)
-        x_norm, y_norm, w_norm, h_norm = coordinates[sample_idx, i].tolist()
-        
-        # Skip padding (usually w=0, h=0)
-        if w_norm <= 0 or h_norm <= 0:
-            continue
+    # 用于统计的列表
+    all_patch_widths = []
+    
+    # ---------------------------
+    # Visualization & Stats Loop
+    # ---------------------------
+    for b in range(BATCH_SIZE): # 遍历 Batch 中的所有图片进行统计
+        for i in range(seq_len):
+            # 获取 coordinates (normalized 0-1)
+            x_norm, y_norm, w_norm, h_norm = coordinates[b, i].tolist()
             
-        # Convert to visualization canvas coords
-        x1 = int(x_norm * VIS_SIZE)
-        y1 = int(y_norm * VIS_SIZE)
-        w = int(max(1, w_norm * VIS_SIZE))
-        h = int(max(1, h_norm * VIS_SIZE))
-        x2 = x1 + w
-        y2 = y1 + h
-        
-        # -- Reconstruct Input --
-        # Resize the 8x8 patch back to its spatial size on the canvas
-        # This will look blocky/pixelated, which is correct (this is what the model "knows")
-        patch_upscaled = cv2.resize(patch_img, (w, h), interpolation=cv2.INTER_NEAREST)
-        
-        # Handle edge cases where resize might exceed canvas slightly due to rounding
-        h_patch, w_patch = patch_upscaled.shape
-        target_h = min(h_patch, VIS_SIZE - y1)
-        target_w = min(w_patch, VIS_SIZE - x1)
-        
-        if target_h > 0 and target_w > 0:
-            reconstructed_input[y1:y1+target_h, x1:x1+target_w] = patch_upscaled[:target_h, :target_w]
+            # Skip padding (usually w=0, h=0)
+            if w_norm <= 0 or h_norm <= 0:
+                continue
             
-        # -- Visualize Mask --
-        is_noised = masks[sample_idx, i].item() == 1
-        if is_noised:
-            # Draw red rectangle for noised/masked patches
-            cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        else:
-            # Draw faint green rectangle for clean patches
-            cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            # 转换回像素尺寸
+            w_px = w_norm * VIS_SIZE
+            h_px = h_norm * VIS_SIZE
+            
+            # 收集统计数据 (边长)
+            all_patch_widths.append(w_px)
+
+            # 仅可视化第一张图片 (sample_idx = 0)
+            if b == sample_idx:
+                # Get patch data (1, 8, 8) -> (8, 8)
+                patch_tensor = pixel_values[b, i, 0] 
+                patch_img = (patch_tensor.numpy() * 255).astype(np.uint8)
+                
+                # Convert to visualization canvas coords
+                x1 = int(x_norm * VIS_SIZE)
+                y1 = int(y_norm * VIS_SIZE)
+                w = int(max(1, w_norm * VIS_SIZE))
+                h = int(max(1, h_norm * VIS_SIZE))
+                x2 = x1 + w
+                y2 = y1 + h
+                
+                # -- Reconstruct Input --
+                patch_upscaled = cv2.resize(patch_img, (w, h), interpolation=cv2.INTER_NEAREST)
+                
+                h_patch, w_patch = patch_upscaled.shape
+                target_h = min(h_patch, VIS_SIZE - y1)
+                target_w = min(w_patch, VIS_SIZE - x1)
+                
+                if target_h > 0 and target_w > 0:
+                    reconstructed_input[y1:y1+target_h, x1:x1+target_w] = patch_upscaled[:target_h, :target_w]
+                    
+                # -- Visualize Mask --
+                is_noised = masks[b, i].item() == 1
+                if is_noised:
+                    cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 0, 255), 10) # 8K图线条要粗一点 (10px)
+                else:
+                    cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 255, 0), 5)
+
+    # ---------------------------
+    # Print Statistics
+    # ---------------------------
+    print("\n" + "="*30)
+    print("PATCH SIZE STATISTICS (in pixels)")
+    print("="*30)
+    if len(all_patch_widths) > 0:
+        avg_w = np.mean(all_patch_widths)
+        std_w = np.std(all_patch_widths)
+        min_w = np.min(all_patch_widths)
+        max_w = np.max(all_patch_widths)
+        
+        print(f"Total patches analyzed: {len(all_patch_widths)}")
+        print(f"Average Patch Size: {avg_w:.2f} x {avg_w:.2f} px")
+        print(f"Std Dev: {std_w:.2f} px")
+        print(f"Smallest Patch: {min_w:.2f} px")
+        print(f"Largest Patch:  {max_w:.2f} px")
+        
+        # 分位数统计
+        print("-" * 20)
+        print("Percentiles:")
+        print(f"25%: {np.percentile(all_patch_widths, 25):.2f} px")
+        print(f"50% (Median): {np.median(all_patch_widths):.2f} px")
+        print(f"75%: {np.percentile(all_patch_widths, 75):.2f} px")
+    else:
+        print("No valid patches found in this batch.")
+    print("="*30 + "\n")
 
     # Save results
     print(f"Saving visualization images for {os.path.basename(orig_path)}...")
     cv2.imwrite("vis_original.png", original_img)
-    cv2.imwrite("vis_edges.png", edges_vis) # 保存 edges 可视化结果
+    cv2.imwrite("vis_edges.png", edges_vis) 
     cv2.imwrite("vis_model_input.png", reconstructed_input)
     cv2.imwrite("vis_mask_overlay.png", mask_vis)
     
