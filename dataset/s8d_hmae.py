@@ -135,7 +135,7 @@ if __name__ == "__main__":
     print(f"Batch Loaded. Visualizing first sample and calculating stats...")
     
     # --- Visualization Parameters ---
-    VIS_SIZE = 2048 # Size of the visualization canvas
+    VIS_SIZE = 8192 # Size of the visualization canvas
     sample_idx = 0
     
     # 1. Load Original Image & Generate Edges
