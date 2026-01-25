@@ -51,7 +51,7 @@ class HDEPretrainDataset(Dataset):
 
         # 2. Pre-processing
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
-        edges = cv2.Canny(blurred, 70, 150)
+        edges = cv2.Canny(blurred, 100, 200)
         image_input_3d = full_image[..., np.newaxis] # (H, W, 1)
 
         # 3. Run HDE Algorithm
@@ -153,9 +153,15 @@ if __name__ == "__main__":
         blurred_full = cv2.GaussianBlur(full_img, (5, 5), 0)
         edges_full = cv2.Canny(blurred_full, 100, 200)
         
+        # 【新增】: 膨胀边缘，防止在 resize 时消失
+        # 8K图片线条太细，resize到2K时如果不加粗，插值后会变成几乎看不见的灰色
+        kernel = np.ones((5,5), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
+        edges_dilated = cv2.dilate(edges_full, kernel, iterations=1)
+        
         # 缩放到可视化尺寸
         original_img = cv2.resize(full_img, (VIS_SIZE, VIS_SIZE))
-        edges_vis = cv2.resize(edges_full, (VIS_SIZE, VIS_SIZE))
+        # 使用最近邻插值保持线条锐利
+        edges_vis = cv2.resize(edges_dilated, (VIS_SIZE, VIS_SIZE), interpolation=cv2.INTER_NEAREST)
     
     # 2. Reconstruct "Model Input" from Patches
     # This shows exactly what the Transformer sees (patches resized to 8x8, some noised)
