@@ -102,8 +102,8 @@ class HDEPretrainDataset(Dataset):
 def get_hde_dataloader(data_root, batch_size=4, num_workers=4):
     dataset = HDEPretrainDataset(
         root_dir=data_root,
-        fixed_length=4096,
-        common_patch_size=64
+        fixed_length=8194,
+        common_patch_size=32
     )
     
     loader = DataLoader(
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     else:
         # 复现 Dataset 中的预处理步骤 (在全分辨率上计算 Canny)
         blurred_full = cv2.GaussianBlur(full_img, (5, 5), 0)
-        edges_full = cv2.Canny(blurred_full, 80, 130)
+        edges_full = cv2.Canny(blurred_full, 50, 130)
         
         # 【新增】: 膨胀边缘，防止在 resize 时消失
         # 8K图片线条太细，resize到2K时如果不加粗，插值后会变成几乎看不见的灰色
