@@ -52,11 +52,11 @@ class SpatioStructuralPosEmbed(nn.Module):
         
         return pos_embed
 
-# --- 2. HDE-ViT Main Model ---
+# --- 2. HMAE-ViT Main Model ---
 
-class HDEVIT(nn.Module):
+class HMAEVIT(nn.Module):
     """
-    Hierarchical Denoising Encoder (HDE) Vision Transformer.
+    Hierarchical Masked Autoencoder (HMAE) Vision Transformer.
     Implements MAE-style efficient encoding with dual prediction heads.
     """
     def __init__(self,
@@ -235,9 +235,9 @@ if __name__ == "__main__":
     N = (img_size // patch_size)**2
     visible_fraction = 0.25
 
-    model = HDEVIT(img_size=img_size, patch_size=patch_size).to(device)
+    model = HMAEVIT(img_size=img_size, patch_size=patch_size).to(device)
     
-    # --- Create a dummy batch mimicking the NEW HDE dataloader structure ---
+    # --- Create a dummy batch mimicking the NEW HMAE dataloader structure ---
     dummy_target_patches = torch.randn(B, N, C, patch_size, patch_size, device=device)
     dummy_target_noise = torch.randn(B, N, C, patch_size, patch_size, device=device) * 0.1
     

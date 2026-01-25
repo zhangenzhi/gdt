@@ -7,11 +7,10 @@ import argparse
 # We assume the Rect and FixedQuadTree classes from your provided code are available.
 # This file can be imported into your main script.
 
-class HDEProcessor:
-    # ... (The original, simple HDEProcessor class is kept for reference or comparison)
+class HMAEProcessor:
     """
     (Original Independent Noise Processor)
-    Encapsulates the logic for the HDE pre-training task with independent noise generation.
+    Encapsulates the logic for the HMAE pre-training task with independent noise generation.
     """
     def __init__(self, visible_fraction=0.25):
         assert 0.0 < visible_fraction < 1.0
@@ -55,16 +54,16 @@ class HDEProcessor:
         return final_patches_sequence, is_noised_mask
 
 
-class HierarchicalHDEProcessor:
+class HierarchicalMAEProcessor:
     """
     (New Hierarchical Noise Processor)
-    Implements the advanced HDE pre-training task with hierarchical, cumulative noise.
+    Implements the advanced HMAE pre-training task with hierarchical, cumulative noise.
     Noise is generated and accumulated during the tree-building process,
     and includes variance suppression to prevent noise explosion.
     """
     def __init__(self, visible_fraction=0.25):
         """
-        Initializes the Hierarchical HDE processor.
+        Initializes the Hierarchical HMAE processor.
         """
         assert 0.0 < visible_fraction < 1.0, "visible_fraction must be between 0 and 1."
         self.visible_fraction = visible_fraction
@@ -210,10 +209,10 @@ class Rect:
         
 # --- Example Usage ---
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Hierarchical HDE Visualization Demo')
-    parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
-    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
-    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/s8d_1_8k_c.png", help='Path to a local image to process.')
+    parser = argparse.ArgumentParser(description='Hierarchical HMAE Visualization Demo')
+    parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hmae/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hmae/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hmae/s8d_1_8k_c.png", help='Path to a local image to process.')
     args = parser.parse_args()
             
     # --- Start of Demo ---
@@ -257,8 +256,8 @@ if __name__ == '__main__':
     blurred = cv2.GaussianBlur(gray_img, (smooth_factor, smooth_factor), 0)
     edges = cv2.Canny(blurred, 110, 170)
 
-    print("Processing with NEW HierarchicalHDEProcessor...")
-    hierarchical_processor = HierarchicalHDEProcessor(visible_fraction=0.25)
+    print("Processing with NEW HierarchicalMAEProcessor...")
+    hierarchical_processor = HierarchicalMAEProcessor(visible_fraction=0.25)
     final_sequence, leaf_nodes, noised_mask, noise_canvas, leaf_depths = hierarchical_processor.create_training_sequence(
         original_image, edges, fixed_length=FIXED_LENGTH
     )

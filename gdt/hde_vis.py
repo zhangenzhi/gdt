@@ -170,10 +170,11 @@ def create_process_visualization(img, edge_map, fixed_length, output_path):
 # --- Main Execution Block ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hierarchical HDE Process Visualization Tool')
-    parser.add_argument('--image_path', type=str, default="/Users/zezzz/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    # parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/rescaled_image_0_4096x4096.png", help='Path to a local image to process.')
+    parser.add_argument('--image_path', type=str, default="/Users/zhangenzhi/Desktop/zez/Me_and_My_Research/hde/hydrogel_16_1024x1024.jpg", help='Path to a local image to process.')
     parser.add_argument('--output_path', type=str, default="hde_process_visualization.gif", help='Path to save the output GIF.')
-    parser.add_argument('--img_size', type=int, default=512, help='Size to resize the input image to.')
-    parser.add_argument('--patches', type=int, default=256, help='Number of final quadtree patches.')
+    parser.add_argument('--img_size', type=int, default=1024, help='Size to resize the input image to.')
+    parser.add_argument('--patches', type=int, default=1024, help='Number of final quadtree patches.')
     args = parser.parse_args()
 
     # Load and prepare the image
@@ -183,7 +184,9 @@ if __name__ == '__main__':
     
     original_image = cv2.resize(original_image, (args.img_size, args.img_size))
     gray_img = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray_img, 50, 150)
+    smooth_factor=5
+    blurred = cv2.GaussianBlur(gray_img, (smooth_factor, smooth_factor), 0)
+    edges = cv2.Canny(blurred, 120, 170)
     
     # Create the visualization
     create_process_visualization(original_image, edges, args.patches, args.output_path)

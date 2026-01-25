@@ -125,7 +125,7 @@ def build_mae_dataloaders(img_size, data_dir, batch_size, num_workers=32):
     return dataloaders
 
 
-from gdt.hde import HierarchicalHDEProcessor
+from gdt.hmae import HierarchicalHDEProcessor
 
 # --- 辅助函数：将 PyTorch 张量转换为 OpenCV 图像 ---
 

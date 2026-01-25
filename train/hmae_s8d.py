@@ -19,7 +19,7 @@ import cv2
 sys.path.append("./")
 
 
-from model.hmae import HDEVIT as HDE
+from model.hvit import HDEVIT as HDE
 from dataset.s8d_hmae import build_hde_imagenet_dataloaders
 
 def setup_logging(args):

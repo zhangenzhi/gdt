@@ -20,9 +20,9 @@ sys.path.append("./")
 # NOTE: You will need to create/provide your HDE model implementation here
 # from model.hde import HDE 
 
-from model.hmae import HDEVIT as HDE
+from model.hvit import HDEVIT as HDE
 from dataset.imagenet import build_hde_imagenet_dataloaders
-from gdt.hde import Rect # Needed for visualization
+from gdt.hmae import Rect # Needed for visualization
 
 def setup_logging(args):
     """Configures logging to file and console."""
