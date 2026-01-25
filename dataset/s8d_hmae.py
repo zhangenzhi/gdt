@@ -30,7 +30,7 @@ class HDEPretrainDataset(Dataset):
 
     def _init_processor(self):
         if self.processor is None:
-            self.processor = HierarchicalHDEProcessor(visible_fraction=0.25)
+            self.processor = HierarchicalHDEProcessor(visible_fraction=0.5)
 
     def __len__(self):
         return len(self.image_files)
@@ -103,7 +103,7 @@ def get_hde_dataloader(data_root, batch_size=4, num_workers=4):
     dataset = HDEPretrainDataset(
         root_dir=data_root,
         fixed_length=8194,
-        common_patch_size=8
+        common_patch_size=16
     )
     
     loader = DataLoader(
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     print(f"Batch Loaded. Visualizing first sample...")
     
     # --- Visualization Parameters ---
-    VIS_SIZE = 2048 # Size of the visualization canvas
+    VIS_SIZE = 8192 # Size of the visualization canvas
     sample_idx = 0
     
     # 1. Load Original Image & Generate Edges
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         
         # 【新增】: 膨胀边缘，防止在 resize 时消失
         # 8K图片线条太细，resize到2K时如果不加粗，插值后会变成几乎看不见的灰色
-        kernel = np.ones((5,5), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
+        kernel = np.ones((3,3), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
         edges_dilated = cv2.dilate(edges_full, kernel, iterations=1)
         
         # 缩放到可视化尺寸
