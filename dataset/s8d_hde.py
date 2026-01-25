@@ -1,44 +1,68 @@
 import os
 import sys
-import time
-import random
 import cv2
 import numpy as np
 import torch
-import multiprocessing
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-# 确保 gdt.hde 路径正确
+# Ensure gdt.hde path is correct
 sys.path.append("./")
 try:
     from gdt.hde import HierarchicalHDEProcessor
 except ImportError:
-    print("Warning: gdt.hde not found, using dummy processor for benchmark.")
+    print("Warning: gdt.hde not found, using dummy processor.")
     class HierarchicalHDEProcessor:
         def __init__(self, visible_fraction=0.25): pass
         def create_training_sequence(self, img, edge, fixed_length):
-            time.sleep(0.1) 
-            return ([np.zeros((32,32,1), dtype=np.uint8)]*fixed_length, [type('obj', (object,), {'get_coord': lambda: (0,0,10,10)})()]*fixed_length, np.zeros(fixed_length), None, None)
+            # Dummy implementation for testing without the library
+            h, w, c = img.shape
+            leaf_nodes = []
+            patches = []
+            mask = np.zeros(fixed_length, dtype=int)
+            # Create a simple grid
+            grid_size = int(np.sqrt(fixed_length))
+            step_x = w // grid_size
+            step_y = h // grid_size
+            
+            for i in range(fixed_length):
+                r = i // grid_size
+                c_idx = i % grid_size
+                x1 = c_idx * step_x
+                y1 = r * step_y
+                x2 = x1 + step_x
+                y2 = y1 + step_y
+                
+                # Mock Rect object
+                bbox = type('Rect', (object,), {'get_coord': lambda: (x1, x2, y1, y2)})()
+                leaf_nodes.append(bbox)
+                
+                # Mock Patch (White or Black)
+                color = 255 if random.random() > 0.5 else 100
+                if random.random() > 0.75: # "Noised"
+                    mask[i] = 1
+                    patch = np.random.randint(0, 255, (step_y, step_x, 1), dtype=np.uint8)
+                else:
+                    mask[i] = 0
+                    patch = np.full((step_y, step_x, 1), color, dtype=np.uint8)
+                patches.append(patch)
+                
+            return (patches, leaf_nodes, mask, None, None)
 
 class HDEPretrainDataset(Dataset):
-    def __init__(self, root_dir, fixed_length=1024, common_patch_size=8, counter=None):
+    def __init__(self, root_dir, fixed_length=1024, common_patch_size=8):
         self.root_dir = Path(root_dir)
-        
-        t_start = time.time()
         self.image_files = list(self.root_dir.rglob('*.png'))
-        print(f"[Main Process] File scanning took: {time.time() - t_start:.4f}s")
         
         self.fixed_length = fixed_length
         self.common_patch_size = common_patch_size
-        self.counter = counter 
         
         self.processor = None 
         
+        # Only ToTensor, NO Normalize (to keep values in 0-1 range for viz)
         self.normalize = transforms.Compose([
             transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.5], std=[0.5]) # 可选归一化
         ])
 
         print(f"Dataset initialized. Found {len(self.image_files)} images.")
@@ -51,33 +75,29 @@ class HDEPretrainDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        # 禁止 OpenCV 在子进程中多线程，防止与 DataLoader 的多进程冲突导致死锁或性能下降
+        # Force single thread for OpenCV in workers
         cv2.setNumThreads(0)
         cv2.ocl.setUseOpenCL(False)
-
-        # 计数器累加
-        if self.counter is not None:
-            with self.counter.get_lock():
-                self.counter.value += 1
         
         self._init_processor()
         img_path = str(self.image_files[idx])
 
-        # 1. IO 读取
+        # 1. Read Image
         full_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if full_image is None:
+            # Fallback for broken images if necessary
+            full_image = np.zeros((8192, 8192), dtype=np.uint8)
 
-        # 2. Canny 计算
+        # 2. Pre-processing
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
         edges = cv2.Canny(blurred, 100, 200)
+        image_input_3d = full_image[..., np.newaxis] # (H, W, 1)
 
-        # 3. 维度调整
-        image_input_3d = full_image[..., np.newaxis]
-
-        # 4. HDE 算法
+        # 3. Run HDE Algorithm
         (patches_seq, leaf_nodes, is_noised_mask, _, _) = \
             self.processor.create_training_sequence(image_input_3d, edges, fixed_length=self.fixed_length)
 
-        # 5. Patch 处理循环
+        # 4. Prepare Batch Data
         processed_patches = []
         coords = []
         valid_len = len(patches_seq)
@@ -89,15 +109,22 @@ class HDEPretrainDataset(Dataset):
                 patch = patches_seq[i] 
                 bbox = leaf_nodes[i]
                 
-                # Resize
-                patch_resized = cv2.resize(patch, (self.common_patch_size, self.common_patch_size))
+                # Resize Patch to common size (e.g., 8x8)
+                if patch.shape[0] > 0 and patch.shape[1] > 0:
+                    patch_resized = cv2.resize(patch, (self.common_patch_size, self.common_patch_size))
+                else:
+                    patch_resized = np.zeros((self.common_patch_size, self.common_patch_size), dtype=np.uint8)
+
+                # Normalize (0-1 float)
                 patch_tensor = self.normalize(patch_resized)
                 
+                # Normalize Coordinates (0-1)
                 x1, x2, y1, y2 = bbox.get_coord()
                 coord = torch.tensor([
                     x1 / w_img, y1 / h_img, (x2-x1) / w_img, (y2-y1) / h_img
                 ], dtype=torch.float32)
             else:
+                # Padding
                 patch_tensor = torch.zeros((1, self.common_patch_size, self.common_patch_size))
                 coord = torch.zeros((4,), dtype=torch.float32)
             
@@ -107,15 +134,15 @@ class HDEPretrainDataset(Dataset):
         return {
             "pixel_values": torch.stack(processed_patches),
             "coordinates": torch.stack(coords),
-            "mask": torch.tensor(is_noised_mask, dtype=torch.long)
+            "mask": torch.tensor(is_noised_mask, dtype=torch.long),
+            "file_path": img_path  # Return path to load original image in main
         }
 
-def get_hde_dataloader(data_root, batch_size=32, num_workers=4, prefetch_factor=2, counter=None):
+def get_hde_dataloader(data_root, batch_size=4, num_workers=4):
     dataset = HDEPretrainDataset(
         root_dir=data_root,
         fixed_length=1024,
-        common_patch_size=8,
-        counter=counter
+        common_patch_size=8
     )
     
     loader = DataLoader(
@@ -123,8 +150,6 @@ def get_hde_dataloader(data_root, batch_size=32, num_workers=4, prefetch_factor=
         batch_size=batch_size,
         shuffle=True, 
         num_workers=num_workers,
-        prefetch_factor=prefetch_factor,
-        persistent_workers=True if num_workers > 0 else False,
         pin_memory=True,
         drop_last=True
     )
@@ -133,42 +158,90 @@ def get_hde_dataloader(data_root, batch_size=32, num_workers=4, prefetch_factor=
 if __name__ == "__main__":
     ROOT = "/work/c30636/dataset/spring8concrete/Resize_8192_output_1" 
     
-    print("=== Test: Full Epoch Benchmark ===")
-    BATCH_SIZE = 32
-    NUM_WORKERS = 32 
-    PREFETCH = 2
+    print("=== Visualizing One Batch ===")
+    BATCH_SIZE = 4
     
-    processed_counter = multiprocessing.Value('i', 0)
+    loader = get_hde_dataloader(ROOT, batch_size=BATCH_SIZE, num_workers=4)
+    
+    # Get one batch
+    batch = next(iter(loader))
+    
+    pixel_values = batch['pixel_values'] # [B, Seq, 1, 8, 8]
+    coordinates = batch['coordinates']   # [B, Seq, 4]
+    masks = batch['mask']                # [B, Seq]
+    file_paths = batch['file_path']      # list of paths
+    
+    print(f"Batch Loaded. Visualizing first sample...")
+    
+    # --- Visualization Parameters ---
+    VIS_SIZE = 2048 # Size of the visualization canvas
+    sample_idx = 0
+    
+    # 1. Load Original Image
+    orig_path = file_paths[sample_idx]
+    original_img = cv2.imread(orig_path, cv2.IMREAD_GRAYSCALE)
+    if original_img is None:
+        print("Error loading original image, using black canvas.")
+        original_img = np.zeros((VIS_SIZE, VIS_SIZE), dtype=np.uint8)
+    else:
+        # Resize original for visualization consistency
+        original_img = cv2.resize(original_img, (VIS_SIZE, VIS_SIZE))
+    
+    # 2. Reconstruct "Model Input" from Patches
+    # This shows exactly what the Transformer sees (patches resized to 8x8, some noised)
+    reconstructed_input = np.zeros((VIS_SIZE, VIS_SIZE), dtype=np.uint8)
+    
+    # 3. Create Mask Visualization (Red overlay for noised areas)
+    mask_vis = cv2.cvtColor(original_img, cv2.COLOR_GRAY2BGR)
+    
+    seq_len = pixel_values.shape[1]
+    
+    for i in range(seq_len):
+        # Get patch data (1, 8, 8) -> (8, 8)
+        patch_tensor = pixel_values[sample_idx, i, 0] 
+        patch_img = (patch_tensor.numpy() * 255).astype(np.uint8)
+        
+        # Get coordinates (normalized 0-1)
+        x_norm, y_norm, w_norm, h_norm = coordinates[sample_idx, i].tolist()
+        
+        # Skip padding (usually w=0, h=0)
+        if w_norm <= 0 or h_norm <= 0:
+            continue
+            
+        # Convert to visualization canvas coords
+        x1 = int(x_norm * VIS_SIZE)
+        y1 = int(y_norm * VIS_SIZE)
+        w = int(max(1, w_norm * VIS_SIZE))
+        h = int(max(1, h_norm * VIS_SIZE))
+        x2 = x1 + w
+        y2 = y1 + h
+        
+        # -- Reconstruct Input --
+        # Resize the 8x8 patch back to its spatial size on the canvas
+        # This will look blocky/pixelated, which is correct (this is what the model "knows")
+        patch_upscaled = cv2.resize(patch_img, (w, h), interpolation=cv2.INTER_NEAREST)
+        
+        # Handle edge cases where resize might exceed canvas slightly due to rounding
+        h_patch, w_patch = patch_upscaled.shape
+        target_h = min(h_patch, VIS_SIZE - y1)
+        target_w = min(w_patch, VIS_SIZE - x1)
+        
+        if target_h > 0 and target_w > 0:
+            reconstructed_input[y1:y1+target_h, x1:x1+target_w] = patch_upscaled[:target_h, :target_w]
+            
+        # -- Visualize Mask --
+        is_noised = masks[sample_idx, i].item() == 1
+        if is_noised:
+            # Draw red rectangle for noised/masked patches
+            cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        else:
+            # Draw faint green rectangle for clean patches
+            cv2.rectangle(mask_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
-    print(f"Config: Batch={BATCH_SIZE}, Workers={NUM_WORKERS}, Prefetch={PREFETCH}")
+    # Save results
+    print(f"Saving visualization images for {os.path.basename(orig_path)}...")
+    cv2.imwrite("vis_original.png", original_img)
+    cv2.imwrite("vis_model_input.png", reconstructed_input)
+    cv2.imwrite("vis_mask_overlay.png", mask_vis)
     
-    # 初始化 DataLoader
-    t_init_start = time.time()
-    loader = get_hde_dataloader(ROOT, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, prefetch_factor=PREFETCH, counter=processed_counter)
-    t_init_end = time.time()
-    print(f"DataLoader Init time: {t_init_end - t_init_start:.4f}s")
-    
-    print(f"Starting to iterate over {len(loader)} batches...")
-    
-    t_epoch_start = time.time()
-    
-    # 遍历整个 Epoch
-    for i, batch in enumerate(loader):
-        # 每 10 个 Batch 打印一次进度，避免无聊
-        if i % 10 == 0:
-            elapsed = time.time() - t_epoch_start
-            imgs_done = (i + 1) * BATCH_SIZE
-            speed = imgs_done / elapsed if elapsed > 0 else 0
-            print(f"Batch [{i}/{len(loader)}] - Speed: {speed:.2f} img/s - Total processed (workers): {processed_counter.value}")
-        time.sleep(0.5)  # 模拟一些处理时间
-
-    t_epoch_end = time.time()
-    total_time = t_epoch_end - t_epoch_start
-    total_images_dataset = len(loader) * BATCH_SIZE # 近似值 (因为 drop_last=True)
-    
-    print("-" * 30)
-    print(f"Full Epoch Finished!")
-    print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f} min)")
-    print(f"Average Throughput: {total_images_dataset / total_time:.2f} img/s")
-    print(f"Total images processed by workers: {processed_counter.value}")
-    print("-" * 30)
+    print("Done! Check vis_original.png, vis_model_input.png, and vis_mask_overlay.png")
