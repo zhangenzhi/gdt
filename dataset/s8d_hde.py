@@ -186,7 +186,7 @@ if __name__ == "__main__":
     ROOT = "/work/c30636/dataset/spring8concrete/Resize_8192_output_1" # 你的数据路径
     
     # 获取 Loader
-    loader = get_hde_dataloader(ROOT, batch_size=4, num_workers=4)
+    loader = get_hde_dataloader(ROOT, batch_size=32, num_workers=32)
     
     print("开始测试 DataLoader...")
     for batch in loader:
@@ -204,4 +204,3 @@ if __name__ == "__main__":
         # 预期: [4, 256]
         
         print(f"Example Mask Values: {mask[0][:10]}")
-        break
