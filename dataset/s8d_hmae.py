@@ -9,46 +9,7 @@ from torchvision import transforms
 
 # Ensure gdt.hde path is correct
 sys.path.append("./")
-try:
-    from gdt.hde import HierarchicalHDEProcessor
-except ImportError:
-    print("Warning: gdt.hde not found, using dummy processor.")
-    class HierarchicalHDEProcessor:
-        def __init__(self, visible_fraction=0.25): pass
-        def create_training_sequence(self, img, edge, fixed_length):
-            # Dummy implementation for testing without the library
-            h, w, c = img.shape
-            leaf_nodes = []
-            patches = []
-            mask = np.zeros(fixed_length, dtype=int)
-            # Create a simple grid
-            grid_size = int(np.sqrt(fixed_length))
-            step_x = w // grid_size
-            step_y = h // grid_size
-            
-            for i in range(fixed_length):
-                r = i // grid_size
-                c_idx = i % grid_size
-                x1 = c_idx * step_x
-                y1 = r * step_y
-                x2 = x1 + step_x
-                y2 = y1 + step_y
-                
-                # Mock Rect object
-                bbox = type('Rect', (object,), {'get_coord': lambda: (x1, x2, y1, y2)})()
-                leaf_nodes.append(bbox)
-                
-                # Mock Patch (White or Black)
-                color = 255 if random.random() > 0.5 else 100
-                if random.random() > 0.75: # "Noised"
-                    mask[i] = 1
-                    patch = np.random.randint(0, 255, (step_y, step_x, 1), dtype=np.uint8)
-                else:
-                    mask[i] = 0
-                    patch = np.full((step_y, step_x, 1), color, dtype=np.uint8)
-                patches.append(patch)
-                
-            return (patches, leaf_nodes, mask, None, None)
+from gdt.hde import HierarchicalHDEProcessor
 
 class HDEPretrainDataset(Dataset):
     def __init__(self, root_dir, fixed_length=1024, common_patch_size=8):
@@ -90,7 +51,7 @@ class HDEPretrainDataset(Dataset):
 
         # 2. Pre-processing
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
-        edges = cv2.Canny(blurred, 100, 200)
+        edges = cv2.Canny(blurred, 70, 150)
         image_input_3d = full_image[..., np.newaxis] # (H, W, 1)
 
         # 3. Run HDE Algorithm
