@@ -126,5 +126,20 @@ if __name__ == "__main__":
     
     print("Starting DataLoader (No Safety Checks)...")
     for batch in loader:
-        print(f"Batch Loaded. Pixel Shape: {batch['pixel_values'].shape}")
-        break
+            pixels = batch['pixel_values']
+            coords = batch['coordinates']
+            mask = batch['mask']
+            
+            # 预期输出形状
+            print(f"Batch Pixel Shape: {pixels.shape}") 
+            # 预期: [32, 1024, 1, 8, 8]  (Batch, Seq, Channel, H, W)
+            
+            print(f"Batch Coords Shape: {coords.shape}") 
+            # 预期: [32, 1024, 4]
+            
+            print(f"Batch Mask Shape:  {mask.shape}")  
+            # 预期: [32, 1024]
+            
+            # 检查数据范围是否归一化到了 [-1, 1] 附近
+            print(f"Pixel Range: min={pixels.min():.2f}, max={pixels.max():.2f}")
+            break
