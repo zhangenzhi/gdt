@@ -48,6 +48,9 @@ class HDEPretrainDataset(Dataset):
         if self.processor is None:
             self.processor = HierarchicalHDEProcessor(visible_fraction=0.25)
 
+    def __len__(self):
+        return len(self.image_files)
+
     def __getitem__(self, idx):
         # 记录每一步的时间
         t0 = time.time()
