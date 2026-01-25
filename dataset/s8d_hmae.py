@@ -103,7 +103,7 @@ def get_hde_dataloader(data_root, batch_size=4, num_workers=4):
     dataset = HDEPretrainDataset(
         root_dir=data_root,
         fixed_length=4096,
-        common_patch_size=32
+        common_patch_size=64
     )
     
     loader = DataLoader(
