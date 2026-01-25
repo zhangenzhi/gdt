@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 # 假设你的 HDE 代码保存在这里，或者直接把你的类贴在上面
-# from hde_core import HierarchicalHDEProcessor, Rect 
+from gdt.hde import HierarchicalHDEProcessor 
 
 # --- 这里为了完整性，粘贴必要的简化版类定义 (确保你运行无误) ---
 class Rect:
