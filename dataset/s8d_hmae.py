@@ -90,7 +90,7 @@ class HDEPretrainDataset(Dataset):
 
         # 2. Pre-processing
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
-        edges = cv2.Canny(blurred, 100, 200)
+        edges = cv2.Canny(blurred, 180, 250)
         image_input_3d = full_image[..., np.newaxis] # (H, W, 1)
 
         # 3. Run HDE Algorithm

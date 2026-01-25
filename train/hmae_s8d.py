@@ -17,12 +17,10 @@ import cv2
 # --- Project-specific Imports ---
 # Assume these modules are in the python path
 sys.path.append("./")
-# NOTE: You will need to create/provide your HDE model implementation here
-# from model.hde import HDE 
 
-from model.hde import HDEVIT as HDE
-from dataset.imagenet import build_hde_imagenet_dataloaders
-from gdt.hde import Rect # Needed for visualization
+
+from model.hmae import HDEVIT as HDE
+from dataset.s8d_hmae import build_hde_imagenet_dataloaders
 
 def setup_logging(args):
     """Configures logging to file and console."""

@@ -71,6 +71,13 @@ def main():
         else:
             print("--- Launching MAE-ViT in Local Mode. ---")
             mae_pretrain_s8d_ddp(args=args,config=config)
+    elif task_name == 'hmae_s8d_pretrain':
+        if is_ddp_environment:
+            print("--- Launching HMAE-ViT in DDP Mode. ---")
+            mae_pretrain_s8d_ddp(args=args,config=config)
+        else:
+            print("--- Launching HMAE-ViT in Local Mode. ---")
+            mae_pretrain_s8d_ddp(args=args,config=config)
     else:
         raise ValueError(f"Unknown task: {task_name}")
 

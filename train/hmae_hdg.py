@@ -20,7 +20,7 @@ sys.path.append("./")
 # NOTE: You will need to create/provide your HDE model implementation here
 # from model.hde import HDE 
 
-from model.hde import HDEVIT as HDE
+from model.hmae import HDEVIT as HDE
 from dataset.imagenet import build_hde_imagenet_dataloaders
 from gdt.hde import Rect # Needed for visualization
 
