@@ -135,8 +135,8 @@ if __name__ == "__main__":
     
     print("=== Test: Full Epoch Benchmark ===")
     BATCH_SIZE = 32
-    NUM_WORKERS = 8 
-    PREFETCH = 4
+    NUM_WORKERS = 32 
+    PREFETCH = 2
     
     processed_counter = multiprocessing.Value('i', 0)
 
@@ -160,6 +160,7 @@ if __name__ == "__main__":
             imgs_done = (i + 1) * BATCH_SIZE
             speed = imgs_done / elapsed if elapsed > 0 else 0
             print(f"Batch [{i}/{len(loader)}] - Speed: {speed:.2f} img/s - Total processed (workers): {processed_counter.value}")
+        time.sleep(4)  # 模拟一些处理时间
 
     t_epoch_end = time.time()
     total_time = t_epoch_end - t_epoch_start
