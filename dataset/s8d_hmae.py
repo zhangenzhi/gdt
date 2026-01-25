@@ -150,7 +150,7 @@ if __name__ == "__main__":
         edges_vis = np.zeros((VIS_SIZE, VIS_SIZE), dtype=np.uint8)
     else:
         # 复现 Dataset 中的预处理步骤 (在全分辨率上计算 Canny)
-        blurred_full = cv2.GaussianBlur(full_img, (3, 3), 0)
+        blurred_full = cv2.GaussianBlur(full_img, (5, 5), 0)
         edges_full = cv2.Canny(blurred_full, 50, 80)
         
         # 【新增】: 膨胀边缘，防止在 resize 时消失
