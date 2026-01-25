@@ -135,8 +135,8 @@ if __name__ == "__main__":
     
     print("=== Test: Full Epoch Benchmark ===")
     BATCH_SIZE = 32
-    NUM_WORKERS = 32 
-    PREFETCH = 2
+    NUM_WORKERS = 8 
+    PREFETCH = 4
     
     processed_counter = multiprocessing.Value('i', 0)
 
