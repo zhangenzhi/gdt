@@ -155,7 +155,7 @@ if __name__ == "__main__":
         
         # 【新增】: 膨胀边缘，防止在 resize 时消失
         # 8K图片线条太细，resize到2K时如果不加粗，插值后会变成几乎看不见的灰色
-        kernel = np.ones((5,5), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
+        kernel = np.ones((3,3), np.uint8) # 5x5 核意味着线条会被加粗到 ~5px
         edges_dilated = cv2.dilate(edges_full, kernel, iterations=1)
         
         # 缩放到可视化尺寸
