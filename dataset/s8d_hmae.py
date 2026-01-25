@@ -90,7 +90,7 @@ class HDEPretrainDataset(Dataset):
 
         # 2. Pre-processing
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
-        edges = cv2.Canny(blurred, 180, 250)
+        edges = cv2.Canny(blurred, 100, 200)
         image_input_3d = full_image[..., np.newaxis] # (H, W, 1)
 
         # 3. Run HDE Algorithm
@@ -177,15 +177,24 @@ if __name__ == "__main__":
     VIS_SIZE = 2048 # Size of the visualization canvas
     sample_idx = 0
     
-    # 1. Load Original Image
+    # 1. Load Original Image & Generate Edges
     orig_path = file_paths[sample_idx]
-    original_img = cv2.imread(orig_path, cv2.IMREAD_GRAYSCALE)
-    if original_img is None:
+    
+    # 读取原始全分辨率图像
+    full_img = cv2.imread(orig_path, cv2.IMREAD_GRAYSCALE)
+    
+    if full_img is None:
         print("Error loading original image, using black canvas.")
         original_img = np.zeros((VIS_SIZE, VIS_SIZE), dtype=np.uint8)
+        edges_vis = np.zeros((VIS_SIZE, VIS_SIZE), dtype=np.uint8)
     else:
-        # Resize original for visualization consistency
-        original_img = cv2.resize(original_img, (VIS_SIZE, VIS_SIZE))
+        # 复现 Dataset 中的预处理步骤 (在全分辨率上计算 Canny)
+        blurred_full = cv2.GaussianBlur(full_img, (5, 5), 0)
+        edges_full = cv2.Canny(blurred_full, 100, 200)
+        
+        # 缩放到可视化尺寸
+        original_img = cv2.resize(full_img, (VIS_SIZE, VIS_SIZE))
+        edges_vis = cv2.resize(edges_full, (VIS_SIZE, VIS_SIZE))
     
     # 2. Reconstruct "Model Input" from Patches
     # This shows exactly what the Transformer sees (patches resized to 8x8, some noised)
@@ -241,7 +250,8 @@ if __name__ == "__main__":
     # Save results
     print(f"Saving visualization images for {os.path.basename(orig_path)}...")
     cv2.imwrite("vis_original.png", original_img)
+    cv2.imwrite("vis_edges.png", edges_vis) # 保存 edges 可视化结果
     cv2.imwrite("vis_model_input.png", reconstructed_input)
     cv2.imwrite("vis_mask_overlay.png", mask_vis)
     
-    print("Done! Check vis_original.png, vis_model_input.png, and vis_mask_overlay.png")
+    print("Done! Check vis_original.png, vis_edges.png, vis_model_input.png, and vis_mask_overlay.png")
