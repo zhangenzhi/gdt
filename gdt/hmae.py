@@ -1,211 +1,155 @@
+import torch
+import torch.nn.functional as F
 import numpy as np
-import random
 import cv2
-from matplotlib import pyplot as plt
-import argparse
+import random
 
-# We assume the Rect and FixedQuadTree classes from your provided code are available.
-# This file can be imported into your main script.
+import torch
+import torch.nn.functional as F
+import numpy as np
+import cv2
+import random
 
-class HMAEProcessor:
-    """
-    (Original Independent Noise Processor)
-    Encapsulates the logic for the HMAE pre-training task with independent noise generation.
-    """
-    def __init__(self, visible_fraction=0.25):
-        assert 0.0 < visible_fraction < 1.0
-        self.visible_fraction = visible_fraction
-
-    def generate_noise_for_patch(self, patch):
-        patch_float = patch.astype(np.float32)
-        avg_p = np.mean(patch_float)
-        if avg_p <= 0:
-            return np.zeros_like(patch_float)
-        std_dev = np.sqrt(avg_p)
-        return np.random.normal(loc=0.0, scale=std_dev, size=patch.shape)
-
-    def create_training_sequence(self, img, qdt):
-        leaf_nodes = [node for node, value in qdt.nodes]
-        num_patches = len(leaf_nodes)
-        indices = list(range(num_patches))
-        random.shuffle(indices)
-        num_visible = int(num_patches * self.visible_fraction)
-        visible_indices = set(indices[:num_visible])
-        
-        final_patches_sequence = []
-        is_noised_mask = np.zeros(qdt.fixed_length, dtype=int)
-
-        for i, bbox in enumerate(leaf_nodes):
-            original_patch = bbox.get_area(img)
-            if i in visible_indices:
-                final_patches_sequence.append(original_patch)
-                is_noised_mask[i] = 0
-            else:
-                is_noised_mask[i] = 1
-                noise = self.generate_noise_for_patch(original_patch)
-                noised_patch_float = original_patch.astype(np.float32) + noise
-                noised_patch = np.clip(noised_patch_float, 0, 255).astype(np.uint8)
-                final_patches_sequence.append(noised_patch)
-        
-        padding_needed = qdt.fixed_length - len(final_patches_sequence)
-        if padding_needed > 0:
-            is_noised_mask[len(final_patches_sequence):] = -1
-
-        return final_patches_sequence, is_noised_mask
-
-
-class HierarchicalMAEProcessor:
-    """
-    (New Hierarchical Noise Processor)
-    Implements the advanced HMAE pre-training task with hierarchical, cumulative noise.
-    Noise is generated and accumulated during the tree-building process,
-    and includes variance suppression to prevent noise explosion.
-    """
-    def __init__(self, visible_fraction=0.25):
-        """
-        Initializes the Hierarchical HMAE processor.
-        """
-        assert 0.0 < visible_fraction < 1.0, "visible_fraction must be between 0 and 1."
-        self.visible_fraction = visible_fraction
-
-    def generate_hierarchical_noise_canvas(self, img, edge_map, fixed_length):
-        """
-        Builds the quadtree and generates a hierarchical noise canvas simultaneously.
-        This version now also tracks the depth of each leaf node.
-        """
-        h, w, c = img.shape
-        
-        # Initialize the canvas that will hold the final accumulated noise
-        noise_canvas = np.zeros((h, w, c), dtype=np.float32)
-        
-        # Initialize the tree building process
-        root = Rect(0, w, 0, h)
-        
-        # The list of active leaf nodes, storing [priority_score, Rect_object, depth]
-        # The root node has a depth of 0.
-        active_nodes = [[root.contains(edge_map), root, 0]]
-
-        # The final list of leaf nodes, storing [Rect_object, depth]
-        final_leaf_nodes_with_depth = []
-
-        # --- Base Noise (Level 0) ---
-        # Calculate and apply noise for the entire image
-        root_patch = root.get_area(img)
-        target_variance = np.mean(root_patch.astype(np.float32))
-        if target_variance > 0:
-            std_dev = np.sqrt(target_variance)
-            noise = np.random.normal(loc=0.0, scale=std_dev, size=root_patch.shape)
-            noise_canvas += noise
-        
-        # --- Iterative Splitting and Noise Addition ---
-        while len(active_nodes) + len(final_leaf_nodes_with_depth) < fixed_length:
-            if not active_nodes: break
-            
-            # Find the leaf with the highest edge score to split
-            score, bbox_to_split, depth = max(active_nodes, key=lambda x: x[0])
-            
-            # If the patch is too small or has no edges, don't split it further.
-            # Move it to the final list.
-            if bbox_to_split.get_size()[0] <= 2 or score == 0:
-                final_leaf_nodes_with_depth.append([bbox_to_split, depth])
-                active_nodes.remove([score, bbox_to_split, depth])
-                continue
-
-            # Split the chosen bbox into 4 children
-            x1, x2, y1, y2 = bbox_to_split.get_coord()
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            children_rects = [
-                Rect(x1, cx, y1, cy), Rect(cx, x2, y1, cy),
-                Rect(x1, cx, cy, y2), Rect(cx, x2, cy, y2)
-            ]
-            
-            # For each new child, add a new layer of noise
-            for child_rect in children_rects:
-                # --- Variance Suppression Logic ---
-                x_c1, x_c2, y_c1, y_c2 = child_rect.get_coord()
-                existing_noise_patch = noise_canvas[y_c1:y_c2, x_c1:x_c2, :]
-                current_variance = np.var(existing_noise_patch)
-                img_patch = child_rect.get_area(img)
-                target_variance = np.mean(img_patch.astype(np.float32))
-                new_variance = max(0, target_variance - current_variance)
-                
-                if new_variance > 0:
-                    new_std_dev = np.sqrt(new_variance)
-                    new_noise = np.random.normal(loc=0.0, scale=new_std_dev, size=img_patch.shape)
-                    noise_canvas[y_c1:y_c2, x_c1:x_c2, :] += new_noise
-
-                # Add the new child with incremented depth to the active list
-                child_score = child_rect.contains(edge_map)
-                active_nodes.append([child_score, child_rect, depth + 1])
-
-            # Remove the parent from the active list
-            active_nodes.remove([score, bbox_to_split, depth])
-
-        # Combine the remaining active nodes with the finalized ones
-        all_leaf_nodes_with_depth = final_leaf_nodes_with_depth + [[node, d] for _, node, d in active_nodes]
-        
-        # Sort nodes by top-to-bottom, left-to-right for a consistent spatial order
-        all_leaf_nodes_with_depth.sort(key=lambda item: (item[0].y1, item[0].x1))
-        
-        # Unzip into separate lists
-        all_leaf_nodes = [item[0] for item in all_leaf_nodes_with_depth]
-        all_leaf_depths = [item[1] for item in all_leaf_nodes_with_depth]
-
-        return noise_canvas, all_leaf_nodes, all_leaf_depths
-
-    def create_training_sequence(self, img, edge_map, fixed_length):
-        """
-        Creates the final training sequence using the hierarchical noise method.
-        """
-        # 1. Generate the hierarchical noise, leaves, and their depths
-        noise_canvas, leaf_nodes, leaf_depths = self.generate_hierarchical_noise_canvas(img, edge_map, fixed_length)
-        num_patches = len(leaf_nodes)
-        
-        # 2. Randomly select which patches will be visible
-        indices = list(range(num_patches))
-        random.shuffle(indices)
-        num_visible = int(num_patches * self.visible_fraction)
-        visible_indices = set(indices[:num_visible])
-        
-        final_patches_sequence = []
-        is_noised_mask = np.zeros(fixed_length, dtype=int)
-
-        # 3. Create the final sequence of clean and noised patches
-        for i, bbox in enumerate(leaf_nodes):
-            original_patch = bbox.get_area(img)
-            
-            if i in visible_indices:
-                final_patches_sequence.append(original_patch)
-                is_noised_mask[i] = 0  # 0 for visible
-            else:
-                is_noised_mask[i] = 1  # 1 for noised
-                x1, x2, y1, y2 = bbox.get_coord()
-                hierarchical_noise = noise_canvas[y1:y2, x1:x2, :]
-                noised_patch_float = original_patch.astype(np.float32) + hierarchical_noise
-                noised_patch = np.clip(noised_patch_float, 0, 255).astype(np.uint8)
-                final_patches_sequence.append(noised_patch)
-
-        # Handle padding for the mask if fewer than fixed_length patches were generated
-        if len(leaf_nodes) < fixed_length:
-            is_noised_mask[len(leaf_nodes):] = -1
-
-        return final_patches_sequence, leaf_nodes, is_noised_mask, noise_canvas, leaf_depths
-
-# For this self-contained example, we include the necessary base classes.
 class Rect:
-    def __init__(self, x1, x2, y1, y2) -> None:
-        self.x1 = int(x1); self.x2 = int(x2); self.y1 = int(y1); self.y2 = int(y2)
-        assert self.x1 <= self.x2 and self.y1 <= self.y2
-    def contains(self, domain):
+    def __init__(self, x1, x2, y1, y2):
+        self.x1, self.x2, self.y1, self.y2 = int(x1), int(x2), int(y1), int(y2)
+
+    def contains(self, edge_map):
         if self.y1 >= self.y2 or self.x1 >= self.x2: return 0
-        patch = domain[self.y1:self.y2, self.x1:self.x2]
+        patch = edge_map[self.y1:self.y2, self.x1:self.x2]
         return int(np.sum(patch) / 255)
-    def get_area(self, img):
-        return img[self.y1:self.y2, self.x1:self.x2, :]
-    def get_coord(self):
-        return self.x1, self.x2, self.y1, self.y2
+
     def get_size(self):
         return self.x2 - self.x1, self.y2 - self.y1
+
+    def get_coord(self):
+        return self.x1, self.x2, self.y1, self.y2
+
+class HierarchicalMaskedAutoEncoder:
+    """
+    负责 HMAE 任务的核心逻辑：
+    1. 四叉树层级分解
+    2. 噪声注入与掩码生成
+    3. 训练损失计算 (train_step_loss)
+    """
+    def __init__(self, visible_fraction=0.25, fixed_length=1024, patch_size=32, norm_pix_loss=True):
+        self.visible_fraction = visible_fraction
+        self.fixed_length = fixed_length
+        self.patch_size = patch_size
+        self.norm_pix_loss = norm_pix_loss
+
+    def process_single(self, img_np, edge_np):
+        """
+        对单张图像进行处理，返回模型所需的各个张量
+        """
+        h, w, c = img_np.shape
+        noise_canvas = np.zeros_like(img_np, dtype=np.float32)
+        root = Rect(0, w, 0, h)
+        
+        active_nodes = [[root.contains(edge_np), root, 0]]
+        final_leaves = []
+
+        # 层次化噪声生成
+        target_var = np.mean(img_np.astype(np.float32))
+        if target_var > 0:
+            noise_canvas += np.random.normal(0, np.sqrt(target_var), img_np.shape)
+
+        while len(active_nodes) + len(final_leaves) < self.fixed_length:
+            if not active_nodes: break
+            score, bbox, depth = max(active_nodes, key=lambda x: x[0])
+            if bbox.get_size()[0] <= 4 or score == 0:
+                final_leaves.append([bbox, depth])
+                active_nodes.remove([score, bbox, depth])
+                continue
+
+            x1, x2, y1, y2 = bbox.get_coord()
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            children = [Rect(x1, cx, y1, cy), Rect(cx, x2, y1, cy), Rect(x1, cx, cy, y2), Rect(cx, x2, cy, y2)]
+            
+            for child in children:
+                cx1, cx2, cy1, cy2 = child.get_coord()
+                curr_var = np.var(noise_canvas[cy1:cy2, cx1:cx2, :])
+                target_var = np.mean(img_np[cy1:cy2, cx1:cx2, :].astype(np.float32))
+                new_var = max(0, target_var - curr_var)
+                if new_var > 0:
+                    noise_canvas[cy1:cy2, cx1:cx2, :] += np.random.normal(0, np.sqrt(new_var), (cy2-cy1, cx2-cx1, c))
+                active_nodes.append([child.contains(edge_np), child, depth + 1])
+            active_nodes.remove([score, bbox, depth])
+
+        all_leaves = final_leaves + [[n, d] for _, n, d in active_nodes]
+        all_leaves.sort(key=lambda x: (x[0].y1, x[0].x1))
+
+        indices = list(range(len(all_leaves)))
+        random.shuffle(indices)
+        visible_set = set(indices[:int(len(all_leaves) * self.visible_fraction)])
+
+        patches, targets, noises, coords, depths, masks = [], [], [], [], [], []
+        for i, (bbox, depth_val) in enumerate(all_leaves):
+            if i >= self.fixed_length: break
+            x1, x2, y1, y2 = bbox.get_coord()
+            clean_patch = img_np[y1:y2, x1:x2, :]
+            noise_patch = noise_canvas[y1:y2, x1:x2, :]
+            
+            if i in visible_set:
+                input_patch = clean_patch
+                mask_val = 0
+            else:
+                input_patch = np.clip(clean_patch.astype(np.float32) + noise_patch, 0, 255).astype(np.uint8)
+                mask_val = 1
+            
+            input_patch = cv2.resize(input_patch, (self.patch_size, self.patch_size))
+            clean_patch = cv2.resize(clean_patch, (self.patch_size, self.patch_size))
+            noise_patch = cv2.resize(noise_patch, (self.patch_size, self.patch_size))
+            
+            patches.append(torch.from_numpy(input_patch).float().permute(2,0,1)/255.0)
+            targets.append(torch.from_numpy(clean_patch).float().permute(2,0,1)/255.0)
+            noises.append(torch.from_numpy(noise_patch).float().permute(2,0,1)/255.0)
+            coords.append(torch.tensor([x1, x2, y1, y2], dtype=torch.float32))
+            depths.append(float(depth_val))
+            masks.append(mask_val)
+
+        while len(patches) < self.fixed_length:
+            patches.append(torch.zeros(c, self.patch_size, self.patch_size))
+            targets.append(torch.zeros(c, self.patch_size, self.patch_size))
+            noises.append(torch.zeros(c, self.patch_size, self.patch_size))
+            coords.append(torch.zeros(4))
+            depths.append(0.0)
+            masks.append(-1)
+
+        return torch.stack(patches), torch.stack(targets), torch.stack(noises), \
+               torch.stack(coords), torch.tensor(depths), torch.tensor(masks)
+
+    def train_step_loss(self, target_patches, pred_patches, target_noise, pred_noise, mask):
+        """
+        计算训练步骤的 Loss
+        """
+        # 图像重建损失 (针对被掩码/污染的区域)
+        target_img = target_patches.flatten(2)
+        if self.norm_pix_loss:
+            mean = target_img.mean(dim=-1, keepdim=True)
+            var = target_img.var(dim=-1, keepdim=True)
+            target_img = (target_img - mean) / (var.sqrt() + 1e-6)
+        
+        loss_img = (pred_patches - target_img) ** 2
+        loss_img = loss_img.mean(dim=-1)
+
+        # 噪声预测损失
+        target_n = target_noise.flatten(2)
+        if self.norm_pix_loss:
+            mean_n = target_n.mean(dim=-1, keepdim=True)
+            var_n = target_n.var(dim=-1, keepdim=True)
+            target_n = (target_n - mean_n) / (var_n.sqrt() + 1e-6)
+        
+        loss_n = (pred_noise - target_n) ** 2
+        loss_n = loss_n.mean(dim=-1)
+
+        # 总损失
+        loss = loss_img + loss_n
+        mask_bool = (mask == 1).float()
+        mask_sum = mask_bool.sum()
+        if mask_sum == 0: return (loss * 0).sum()
+        
+        return (loss * mask_bool).sum() / mask_sum
         
 # --- Example Usage ---
 if __name__ == '__main__':
