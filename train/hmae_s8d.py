@@ -48,10 +48,11 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
     """
     Creates and saves a visualization for the HMAE task.
     """
-    target_patches = processed_batch['targets'][0].cpu() # [L, C, P, P]
-    input_patches = processed_batch['patches'][0].cpu()   # [L, C, P, P]
-    mask = processed_batch['mask'][0].cpu()              # [L]
-    recon_patches = pred_img[0].cpu()                    # [L, patch_dim]
+    # Convert tensors to float32 immediately to avoid BFloat16 errors with Matplotlib/NumPy
+    target_patches = processed_batch['targets'][0].detach().cpu().float() # [L, C, P, P]
+    input_patches = processed_batch['patches'][0].detach().cpu().float()   # [L, C, P, P]
+    mask = processed_batch['mask'][0].detach().cpu()                      # [L]
+    recon_patches = pred_img[0].detach().cpu().float()                    # [L, patch_dim]
     
     # Select up to 16 noised patches for visualization
     indices = torch.where(mask == 1)[0][:16]
@@ -75,7 +76,7 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
         
         # Reconstruction - Needs reshape from [patch_dim] to [C, P, P]
         # We use view_as to match the shape of the target patch
-        recon_patch_reshaped = recon_patches[idx].detach().view_as(target_patches[idx])
+        recon_patch_reshaped = recon_patches[idx].view_as(target_patches[idx])
         axes[i, 2].imshow(recon_patch_reshaped.permute(1, 2, 0).numpy().squeeze(), cmap='gray')
         axes[i, 2].set_title("Recon")
         
