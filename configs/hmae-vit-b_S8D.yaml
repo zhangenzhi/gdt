@@ -1,0 +1,35 @@
+# HMAE-ViT-B-S8D 预训练配置
+
+task_name: "hmae_s8d_pretrain"
+
+model:
+  img_size: 1024
+  patch_size: 32
+  in_channels: 1
+  # Encoder (ViT-Base)
+  encoder_embed_dim: 768
+  encoder_depth: 12
+  encoder_heads: 12
+  # Decoder
+  decoder_embed_dim: 512
+  decoder_depth: 8
+  decoder_heads: 16
+  # HMAE Specific
+  visible_fraction: 0.25
+  fixed_length: 1024
+  max_depth: 8
+
+training:
+  num_epochs: 100
+  warmup_epochs: 10
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  learning_rate: 1.5e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  eta_min: 1.0e-6
+
+dataset:
+  # 注意：在训练脚本命令行参数 --data_dir 中也可以覆盖此项
+  data_path: "/work/c30636/dataset/spring8concrete/Resize_8192_output_1"
+  num_workers: 8
