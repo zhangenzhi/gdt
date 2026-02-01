@@ -19,8 +19,10 @@ import cv2
 sys.path.append("./")
 
 from model.hvit import HMAEVIT as HVIT
+from model.utilz import save_checkpoint, load_checkpoint
 from gdt.hmae import HierarchicalMaskedAutoEncoder
 from dataset.s8d_hmae import S8DPretrainDataset
+
 
 def setup_logging(config):
     """Configures logging using paths from the config file."""
@@ -45,12 +47,11 @@ def setup_logging(config):
 def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, prefix="train"):
     """
     Creates and saves a visualization for the HMAE task.
-    Shows: Target Patches, Noised Input Patches, and Reconstructed Patches.
     """
-    target_patches = processed_batch['targets'][0].cpu()
-    input_patches = processed_batch['patches'][0].cpu()
-    mask = processed_batch['mask'][0].cpu()
-    recon_patches = pred_img[0].cpu()
+    target_patches = processed_batch['targets'][0].cpu() # [L, C, P, P]
+    input_patches = processed_batch['patches'][0].cpu()   # [L, C, P, P]
+    mask = processed_batch['mask'][0].cpu()              # [L]
+    recon_patches = pred_img[0].cpu()                    # [L, patch_dim]
     
     # Select up to 16 noised patches for visualization
     indices = torch.where(mask == 1)[0][:16]
@@ -64,15 +65,20 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
         axes = np.expand_dims(axes, axis=0)
 
     for i, idx in enumerate(indices):
-        # Target (Clean)
+        # Target (Clean) - Already [C, P, P]
         axes[i, 0].imshow(target_patches[idx].permute(1, 2, 0).numpy().squeeze(), cmap='gray')
         axes[i, 0].set_title("Target")
-        # Input (Noised)
+        
+        # Input (Noised) - Already [C, P, P]
         axes[i, 1].imshow(input_patches[idx].permute(1, 2, 0).numpy().squeeze(), cmap='gray')
         axes[i, 1].set_title("Input")
-        # Reconstruction
-        axes[i, 2].imshow(recon_patches[idx].detach().permute(1, 2, 0).numpy().squeeze(), cmap='gray')
+        
+        # Reconstruction - Needs reshape from [patch_dim] to [C, P, P]
+        # We use view_as to match the shape of the target patch
+        recon_patch_reshaped = recon_patches[idx].detach().view_as(target_patches[idx])
+        axes[i, 2].imshow(recon_patch_reshaped.permute(1, 2, 0).numpy().squeeze(), cmap='gray')
         axes[i, 2].set_title("Recon")
+        
         for ax in axes[i]: ax.axis('off')
 
     plt.tight_layout()
@@ -123,6 +129,11 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, val_loader, optimizer,
     is_main_process = not is_ddp or (dist.get_rank() == 0)
     
     output_path = os.path.join(config['output']['base_dir'], config['output']['save_name'])
+    
+    # Optional: Load checkpoint if resuming
+    resume_path = os.path.join(output_path, "latest_checkpoint.pth")
+    if os.path.exists(resume_path):
+        start_epoch = load_checkpoint(model, optimizer, scheduler, scaler, resume_path, device_id)
 
     if is_main_process:
         logging.info(f"Starting HMAE pre-training for {num_epochs} epochs...")
@@ -165,12 +176,7 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, val_loader, optimizer,
 
         if is_main_process:
             checkpoint_path = os.path.join(output_path, "latest_checkpoint.pth")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.module.state_dict() if is_ddp else model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'config': config
-            }, checkpoint_path)
+            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, checkpoint_path)
 
 def hmae_s8d_pretrain_ddp(config):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))

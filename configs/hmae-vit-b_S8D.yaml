@@ -15,8 +15,9 @@ model:
   decoder_depth: 8
   decoder_heads: 16
   # HMAE Specific
-  visible_fraction: 0.25
+  visible_fraction: 0.5
   fixed_length: 1024
+  common_patch_size: 32
   max_depth: 8
 
 training:
