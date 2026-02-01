@@ -30,6 +30,11 @@ training:
   eta_min: 1.0e-6
 
 dataset:
-  # 注意：在训练脚本命令行参数 --data_dir 中也可以覆盖此项
-  data_path: "/work/c30636/dataset/spring8concrete/Resize_8192_output_1"
+  # 对应原 parser.add_argument 参数
+  data_dir: "/work/c30636/dataset/spring8concrete/Resize_8192_output_1"
   num_workers: 8
+
+output:
+  # 对应原 parser.add_argument 参数
+  base_dir: "./output"
+  save_name: "hmae_run_01"
