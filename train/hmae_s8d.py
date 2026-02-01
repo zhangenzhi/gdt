@@ -253,7 +253,7 @@ def hmae_s8d_pretrain_ddp(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HMAE Pre-training Script")
-    parser.add_argument('--config', type=str, default='./configs/hmae-vit-b-s8d.yaml', help='Path to YAML config')
+    parser.add_argument('--config', type=str, default='./configs/hmae-vit-b_S8D.yaml', help='Path to YAML config')
     args = parser.parse_args()
     
     with open(args.config, 'r') as f:
