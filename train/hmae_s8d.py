@@ -44,47 +44,71 @@ def setup_logging(config):
         ]
     )
 
-def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, prefix="train"):
+def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, config, prefix="train"):
     """
-    Creates and saves a visualization for the HMAE task.
+    将 Patches 重新拼成完整图像进行可视化对比。
+    显示：原始全图、HMAE 输入全图（含噪声）、模型重建全图。
     """
-    # Convert tensors to float32 immediately to avoid BFloat16 errors with Matplotlib/NumPy
-    target_patches = processed_batch['targets'][0].detach().cpu().float() # [L, C, P, P]
-    input_patches = processed_batch['patches'][0].detach().cpu().float()   # [L, C, P, P]
-    mask = processed_batch['mask'][0].detach().cpu()                      # [L]
-    recon_patches = pred_img[0].detach().cpu().float()                    # [L, patch_dim]
+    img_size = config['model']['img_size']
     
-    # Select up to 16 noised patches for visualization
-    indices = torch.where(mask == 1)[0][:16]
-    if len(indices) == 0: return
-
-    num_plot = len(indices)
-    fig, axes = plt.subplots(num_plot, 3, figsize=(9, 2 * num_plot))
+    # 转换数据到 CPU 和 float32
+    target_patches = processed_batch['targets'][0].detach().cpu().float()  # [L, C, P, P]
+    input_patches = processed_batch['patches'][0].detach().cpu().float()    # [L, C, P, P]
+    coords = processed_batch['coords'][0].detach().cpu().numpy().astype(int) # [L, 4] -> (x1, x2, y1, y2)
+    mask = processed_batch['mask'][0].detach().cpu().numpy()               # [L]
+    recon_patches = pred_img[0].detach().cpu().float()                     # [L, patch_dim]
     
-    # Handle single patch case for subplot indexing
-    if num_plot == 1:
-        axes = np.expand_dims(axes, axis=0)
+    # 初始化画布 (H, W)
+    canvas_target = np.zeros((img_size, img_size), dtype=np.float32)
+    canvas_input = np.zeros((img_size, img_size), dtype=np.float32)
+    canvas_recon = np.zeros((img_size, img_size), dtype=np.float32)
 
-    for i, idx in enumerate(indices):
-        # Target (Clean) - Already [C, P, P]
-        axes[i, 0].imshow(target_patches[idx].permute(1, 2, 0).numpy().squeeze(), cmap='gray')
-        axes[i, 0].set_title("Target")
-        
-        # Input (Noised) - Already [C, P, P]
-        axes[i, 1].imshow(input_patches[idx].permute(1, 2, 0).numpy().squeeze(), cmap='gray')
-        axes[i, 1].set_title("Input")
-        
-        # Reconstruction - Needs reshape from [patch_dim] to [C, P, P]
-        # We use view_as to match the shape of the target patch
-        recon_patch_reshaped = recon_patches[idx].view_as(target_patches[idx])
-        axes[i, 2].imshow(recon_patch_reshaped.permute(1, 2, 0).numpy().squeeze(), cmap='gray')
-        axes[i, 2].set_title("Recon")
-        
-        for ax in axes[i]: ax.axis('off')
+    L = target_patches.shape[0]
+    for i in range(L):
+        m_val = mask[i]
+        if m_val == -1: # 跳过填充部分
+            continue
+            
+        x1, x2, y1, y2 = coords[i]
+        w, h = x2 - x1, y2 - y1
+        if w <= 0 or h <= 0:
+            continue
+
+        # 1. 原始补丁粘贴
+        t_patch_np = target_patches[i].permute(1, 2, 0).numpy().squeeze()
+        canvas_target[y1:y2, x1:x2] = cv2.resize(t_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        # 2. 输入补丁粘贴 (可见部分是原图，不可见部分是噪声)
+        i_patch_np = input_patches[i].permute(1, 2, 0).numpy().squeeze()
+        canvas_input[y1:y2, x1:x2] = cv2.resize(i_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        # 3. 重建补丁粘贴 (如果是可见补丁，用原图；如果是掩码补丁，用模型输出)
+        if m_val == 0: # Visible
+            canvas_recon[y1:y2, x1:x2] = canvas_target[y1:y2, x1:x2]
+        else: # Masked (Noised)
+            # 将模型输出 view 回 [C, P, P]
+            r_patch_reshaped = recon_patches[i].view_as(target_patches[i])
+            r_patch_np = r_patch_reshaped.permute(1, 2, 0).numpy().squeeze()
+            canvas_recon[y1:y2, x1:x2] = cv2.resize(r_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    # 绘制对比图
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(f"Step: {step} | Reconstruction Loss: {loss:.6f}", fontsize=14)
+    
+    axes[0].imshow(canvas_target, cmap='gray', vmin=0, vmax=1)
+    axes[0].set_title("Original (Target)")
+    
+    axes[1].imshow(canvas_input, cmap='gray', vmin=0, vmax=1)
+    axes[1].set_title("HMAE Input (Clean + Noise)")
+    
+    axes[2].imshow(canvas_recon, cmap='gray', vmin=0, vmax=1)
+    axes[2].set_title("Reconstructed (Clean + Pred)")
+    
+    for ax in axes: ax.axis('off')
 
     plt.tight_layout()
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f"{prefix}_{step}.png"))
+    plt.savefig(os.path.join(output_dir, f"{prefix}_{step}_full.png"))
     plt.close(fig)
 
 def run_pretrain_batch(batch, model, hmae_engine, device_id):
