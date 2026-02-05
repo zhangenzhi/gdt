@@ -38,4 +38,4 @@ dataset:
 output:
   # 对应原 parser.add_argument 参数
   base_dir: "./output"
-  save_name: "hmae_run_01"
+  save_name: "hmae_s8d_pretrain"
