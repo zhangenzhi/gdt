@@ -46,12 +46,12 @@ def setup_logging(config):
 
 def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, config, prefix="train"):
     """
-    将 Patches 重新拼成完整图像进行可视化对比。
+    将 Patches 重新拼成完整图像进行可视化对比，并展示 QDT 网格结构。
     """
     img_size = config['model']['img_size']
     
     # 转换为 float32 避免绘图报错
-    target_patches = processed_batch['patches'][0].detach().cpu().float() # [L, C, P, P]
+    target_patches = processed_batch['targets'][0].detach().cpu().float() # [L, C, P, P]
     coords = processed_batch['coords'][0].detach().cpu().numpy().astype(int)
     mask = processed_batch['mask_vis'][0].detach().cpu().numpy() # 模型生成的掩码
     recon_patches = pred_img[0].detach().cpu().float()                    # [L, patch_dim]
@@ -59,6 +59,7 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
     canvas_target = np.zeros((img_size, img_size), dtype=np.float32)
     canvas_input = np.zeros((img_size, img_size), dtype=np.float32)
     canvas_recon = np.zeros((img_size, img_size), dtype=np.float32)
+    canvas_qdt = np.zeros((img_size, img_size), dtype=np.float32)
 
     L = target_patches.shape[0]
     for i in range(L):
@@ -69,24 +70,38 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
 
         # 1. Target Patch
         t_patch_np = target_patches[i].permute(1, 2, 0).numpy().squeeze()
-        canvas_target[y1:y2, x1:x2] = cv2.resize(t_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+        resized_t = cv2.resize(t_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+        canvas_target[y1:y2, x1:x2] = resized_t
+        canvas_qdt[y1:y2, x1:x2] = resized_t
+        
+        # 在 QDT 画布上绘制网格线
+        cv2.rectangle(canvas_qdt, (x1, y1), (x2, y2), (1.0,), 1)
 
         # 2. Input Patch (仅显示可见部分，其余黑色)
         if m_val == 0:
-            canvas_input[y1:y2, x1:x2] = canvas_target[y1:y2, x1:x2]
+            canvas_input[y1:y2, x1:x2] = resized_t
         
         # 3. Reconstruction
-        recon_patch_reshaped = recon_patches[i].view_as(target_patches[i])
-        r_patch_np = recon_patch_reshaped.permute(1, 2, 0).numpy().squeeze()
-        canvas_recon[y1:y2, x1:x2] = cv2.resize(r_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
+        if m_val == 0:
+            canvas_recon[y1:y2, x1:x2] = resized_t
+        else:
+            # Reshape from flattened vector back to [C, P, P]
+            r_patch_reshaped = recon_patches[i].view_as(target_patches[i])
+            r_patch_np = r_patch_reshaped.permute(1, 2, 0).numpy().squeeze()
+            canvas_recon[y1:y2, x1:x2] = cv2.resize(r_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
     axes[0].imshow(canvas_target, cmap='gray', vmin=0, vmax=1)
     axes[0].set_title("Original (Target)")
-    axes[1].imshow(canvas_input, cmap='gray', vmin=0, vmax=1)
-    axes[1].set_title("HMAE Input (Visible only)")
-    axes[2].imshow(canvas_recon, cmap='gray', vmin=0, vmax=1)
-    axes[2].set_title("Reconstructed")
+    
+    axes[1].imshow(canvas_qdt, cmap='gray', vmin=0, vmax=1)
+    axes[1].set_title("QDT Structure")
+    
+    axes[2].imshow(canvas_input, cmap='gray', vmin=0, vmax=1)
+    axes[2].set_title("HMAE Input (Visible)")
+    
+    axes[3].imshow(canvas_recon, cmap='gray', vmin=0, vmax=1)
+    axes[3].set_title("Reconstructed")
     
     for ax in axes: ax.axis('off')
     plt.tight_layout()
