@@ -14,7 +14,7 @@ model:
   decoder_embed_dim: 512
   decoder_depth: 8
   decoder_heads: 16
-  mask_ratio: 0.5
+  mask_ratio: 0.75
   # HMAE Specific
   fixed_length: 8194
   common_patch_size: 32
@@ -23,7 +23,7 @@ model:
   norm_pix_loss: true
 
 training:
-  num_epochs: 100
+  num_epochs: 400
   warmup_epochs: 10
   batch_size: 8
   gradient_accumulation_steps: 1
@@ -38,4 +38,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq8k-bs8-lr1.5e-4-100ep"
+  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-400ep-mr75"
