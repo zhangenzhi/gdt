@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset
-from hmae_processor import HierarchicalMaskedAutoEncoder
+from gdt.hmae import HierarchicalMaskedAutoEncoder
 
 class S8DPretrainDataset(Dataset):
     """

@@ -20,7 +20,6 @@ sys.path.append("./")
 
 from model.hvit import HMAEVIT as HVIT
 from model.utilz import save_checkpoint, load_checkpoint
-from gdt.hmae import HierarchicalMaskedAutoEncoder
 from dataset.s8d_hmae import S8DPretrainDataset
 
 
