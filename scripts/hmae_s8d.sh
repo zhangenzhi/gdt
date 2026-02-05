@@ -75,4 +75,4 @@ mpirun -np 1 \
     --rdzv_id=$PBS_JOBID \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
-    ./hmae_s8d.py
+    ./train/hmae_s8d.py
