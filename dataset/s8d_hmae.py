@@ -8,37 +8,34 @@ import cv2
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset
-
-import torch
-import cv2
-import numpy as np
-from pathlib import Path
-from torch.utils.data import Dataset
-from gdt.hmae import HierarchicalMaskedAutoEncoder
+from hmae_processor import HierarchicalMaskedAutoEncoder
 
 class S8DPretrainDataset(Dataset):
     """
-    更新后的数据集：在 worker 进程中直接调用 HMAE 引擎进行预处理。
+    更新后的数据集类：在 DataLoader 的 worker 进程中直接调用 HMAE 引擎进行预处理。
+    该版本适配 MAE 风格架构，仅输出原始空间序列及其几何信息，掩码逻辑由模型端处理。
     """
     def __init__(self, root_dir, img_size=1024, hmae_config=None):
         self.root_dir = Path(root_dir)
+        # 支持常见图像格式
         self.image_files = list(self.root_dir.rglob('*.png')) + list(self.root_dir.rglob('*.jpg'))
         self.img_size = img_size
         
-        # 在这里初始化引擎配置，但实际引擎实例建议在 getitem 或 worker_init 中创建
+        # MAE 风格下，处理器仅定义序列长度和补丁大小
         self.hmae_config = hmae_config or {
-            'visible_fraction': 0.25,
             'fixed_length': 1024,
             'patch_size': 32
         }
         self.engine = None 
-        print(f"Dataset initialized. Found {len(self.image_files)} images.")
+        print(f"S8D 数据集初始化完成。找到 {len(self.image_files)} 张图像。")
 
     def _init_engine(self):
-        # 延迟初始化，确保每个 worker 进程有自己的引擎实例（避免随机种子冲突）
+        """
+        延迟初始化引擎。确保每个多进程 worker 拥有独立的引擎实例，
+        避免并发冲突并确保随机性。
+        """
         if self.engine is None:
             self.engine = HierarchicalMaskedAutoEncoder(
-                visible_fraction=self.hmae_config['visible_fraction'],
                 fixed_length=self.hmae_config['fixed_length'],
                 patch_size=self.hmae_config['patch_size']
             )
@@ -47,6 +44,7 @@ class S8DPretrainDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, idx):
+        # 禁用单线程中的 OpenCV 多线程，优化 DataLoader 的 worker 性能
         cv2.setNumThreads(0)
         self._init_engine()
         
@@ -54,29 +52,29 @@ class S8DPretrainDataset(Dataset):
         full_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         
         if full_image is None:
+            # 如果图像读取失败，返回一个全黑画布
             full_image = np.zeros((self.img_size, self.img_size), dtype=np.uint8)
         
+        # 统一缩放至配置尺寸
         if full_image.shape[0] != self.img_size or full_image.shape[1] != self.img_size:
             full_image = cv2.resize(full_image, (self.img_size, self.img_size))
 
-        # 1. 边缘检测
+        # 1. 边缘检测：为四叉树分解提供重要性评估分值
         blurred = cv2.GaussianBlur(full_image, (5, 5), 0)
         edges = cv2.Canny(blurred, 50, 100)
 
-        # 2. 调用 HMAE 引擎进行复杂的 CPU 预处理
-        # 注意：这里我们处理的是单张图 [H, W, 1]
+        # 2. 调用 HMAE 引擎进行 CPU 端的四叉树分解和序列生成
+        # 输入形状需符合引擎要求的 (H, W, 1)
         img_np = full_image[..., np.newaxis]
-        p, t, n, c, d, m = self.engine.process_single(img_np, edges)
+        patches, coords, depths = self.engine.process_single(img_np, edges)
 
-        # 返回模型所需的所有张量
+        # 3. 返回训练所需的全部基础数据
         return {
-            "patches": p,      # [L, C, P, P]
-            "targets": t,      # [L, C, P, P]
-            "noises": n,       # [L, C, P, P]
-            "coords": c,       # [L, 4]
-            "depths": d,       # [L]
-            "mask": m,         # [L]
-            "original_image": torch.from_numpy(full_image).float().unsqueeze(0) / 255.0 # 仅供可视化使用
+            "patches": patches,  # 补丁序列 [L, C, P, P]
+            "targets": patches,  # 目标即为原始补丁
+            "coords": coords,    # 空间坐标 [L, 4] (x1, x2, y1, y2)
+            "depths": depths,    # 树深度信息 [L]
+            "original_image": torch.from_numpy(full_image).float().unsqueeze(0) / 255.0 # 供可视化使用
         }
 
 def get_s8d_dataloader(data_root, batch_size=4, num_workers=4):
