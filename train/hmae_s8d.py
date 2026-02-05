@@ -111,69 +111,36 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}_full.png"))
     plt.close(fig)
 
-def run_pretrain_batch(batch, model, hmae_engine, device_id):
-    """
-    Helper to process raw images through the engine and model.
-    """
-    images = batch['image'] # [B, 1, H, W]
-    edges = batch['edges']  # [B, 1, H, W]
-    
-    batch_patches, batch_targets, batch_noises, batch_coords, batch_depths, batch_masks = [], [], [], [], [], []
-    
-    # CPU-based processing via the HMAE Engine
-    imgs_np = (images.permute(0, 2, 3, 1).cpu().numpy() * 255).astype('uint8')
-    edges_np = (edges.squeeze(1).cpu().numpy() * 255).astype('uint8')
-
-    for b in range(images.shape[0]):
-        p, t, n, c, d, m = hmae_engine.process_single(imgs_np[b], edges_np[b])
-        batch_patches.append(p)
-        batch_targets.append(t)
-        batch_noises.append(n)
-        batch_coords.append(c)
-        batch_depths.append(d)
-        batch_masks.append(m)
-
-    processed = {
-        'patches': torch.stack(batch_patches).to(device_id, non_blocking=True),
-        'targets': torch.stack(batch_targets).to(device_id, non_blocking=True),
-        'noises': torch.stack(batch_noises).to(device_id, non_blocking=True),
-        'coords': torch.stack(batch_coords).to(device_id, non_blocking=True),
-        'depths': torch.stack(batch_depths).to(device_id, non_blocking=True),
-        'mask': torch.stack(batch_masks).to(device_id, non_blocking=True)
-    }
-
-    pred_img, pred_noise = model(processed['patches'], processed['coords'], processed['depths'], processed['mask'])
-    loss = hmae_engine.train_step_loss(processed['targets'], pred_img, processed['noises'], pred_noise, processed['mask'])
-    
-    return loss, pred_img, processed
-
-def pretrain_hmae_model(model, hmae_engine, train_loader, val_loader, optimizer, scheduler, device_id, config, start_epoch=0, is_ddp=False):
+def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, device_id, config, start_epoch=0, is_ddp=False):
     scaler = GradScaler(enabled=True)
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
     num_epochs = config['training']['num_epochs']
     is_main_process = not is_ddp or (dist.get_rank() == 0)
     
     output_path = os.path.join(config['output']['base_dir'], config['output']['save_name'])
-    
-    # Optional: Load checkpoint if resuming
-    resume_path = os.path.join(output_path, "latest_checkpoint.pth")
-    if os.path.exists(resume_path):
-        start_epoch = load_checkpoint(model, optimizer, scheduler, scaler, resume_path, device_id)
 
-    if is_main_process:
-        logging.info(f"Starting HMAE pre-training for {num_epochs} epochs...")
-    
     for epoch in range(start_epoch, num_epochs):
         if is_ddp: train_loader.sampler.set_epoch(epoch)
         model.train()
         running_loss = 0.0
         
         for i, batch in enumerate(train_loader):
+            # 将 DataLoader 已经切分好的数据移动到 GPU
+            # 现在的 batch 直接就是处理好的各个张量
+            batch = {k: v.to(device_id, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            
             sync_context = model.no_sync() if (is_ddp and (i + 1) % accumulation_steps != 0) else contextlib.nullcontext()
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
-                    loss, pred_img, processed = run_pretrain_batch(batch, model, hmae_engine, device_id)
+                    # 1. 模型预测
+                    pred_img, pred_noise = model(
+                        batch['patches'], batch['coords'], batch['depths'], batch['mask']
+                    )
+                    # 2. 计算损失
+                    loss = hmae_engine.train_step_loss(
+                        batch['targets'], pred_img, batch['noises'], pred_noise, batch['mask']
+                    )
                     loss = loss / accumulation_steps
                 
                 scaler.scale(loss).backward()
@@ -188,20 +155,17 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, val_loader, optimizer,
             
             if (i + 1) % 500 == 0 and is_main_process:
                 visualize_hmae_reconstruction(
-                    processed, pred_img, loss.item() * accumulation_steps, i + 1,
-                    os.path.join(output_path, "images"),
-                    prefix=f"train_e{epoch + 1}"
+                    batch, pred_img, loss.item() * accumulation_steps, i + 1,
+                    os.path.join(output_path, "images"), config, prefix=f"train_e{epoch + 1}"
                 )
 
             if (i + 1) % 10 == 0 and is_main_process:
-                avg_loss = running_loss / 10
-                current_lr = optimizer.param_groups[0]['lr']
-                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Loss: {avg_loss:.5f}, LR: {current_lr:.6f}')
+                logging.info(f'[Epoch {epoch + 1}, Batch {i + 1}] Loss: {(running_loss/10):.5f}')
                 running_loss = 0.0
 
         if is_main_process:
-            checkpoint_path = os.path.join(output_path, "latest_checkpoint.pth")
-            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, checkpoint_path)
+            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, os.path.join(output_path, "latest_checkpoint.pth"))
+
 
 def hmae_s8d_pretrain_ddp(config):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
