@@ -45,15 +45,16 @@ def setup_logging(config):
 
 def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, config, prefix="train"):
     """
-    将 Patches 重新拼成完整图像进行可视化对比，并展示 QDT 网格结构。
+    将补丁重新拼成原图，并进行局部的反归一化处理以保证可视化效果。
     """
     img_size = config['model']['img_size']
+    norm_pix_loss = config['model'].get('norm_pix_loss', True)
     
     # 转换为 float32 避免绘图报错
     target_patches = processed_batch['targets'][0].detach().cpu().float() # [L, C, P, P]
     coords = processed_batch['coords'][0].detach().cpu().numpy().astype(int)
-    mask = processed_batch['mask_vis'][0].detach().cpu().numpy() # 模型生成的掩码
-    recon_patches = pred_img[0].detach().cpu().float()                    # [L, patch_dim]
+    mask = processed_batch['mask_vis'][0].detach().cpu().numpy()
+    recon_patches = pred_img[0].detach().cpu().float() # [L, patch_dim]
     
     canvas_target = np.zeros((img_size, img_size), dtype=np.float32)
     canvas_input = np.zeros((img_size, img_size), dtype=np.float32)
@@ -67,26 +68,34 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
         w, h = x2 - x1, y2 - y1
         if w <= 0 or h <= 0: continue
 
-        # 1. Target Patch
+        # 1. 原始补丁 (Target)
         t_patch_np = target_patches[i].permute(1, 2, 0).numpy().squeeze()
         resized_t = cv2.resize(t_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
         canvas_target[y1:y2, x1:x2] = resized_t
-        canvas_qdt[y1:y2, x1:x2] = resized_t
         
-        # 在 QDT 画布上绘制网格线
+        # 2. QDT 网格结构
+        canvas_qdt[y1:y2, x1:x2] = resized_t
         cv2.rectangle(canvas_qdt, (x1, y1), (x2, y2), (1.0,), 1)
 
-        # 2. Input Patch (仅显示可见部分，其余黑色)
+        # 3. 输入补丁 (Input - MAE 风格仅显示可见部分)
         if m_val == 0:
             canvas_input[y1:y2, x1:x2] = resized_t
         
-        # 3. Reconstruction
+        # 4. 重建补丁 (Reconstruction)
         if m_val == 0:
             canvas_recon[y1:y2, x1:x2] = resized_t
         else:
-            # Reshape from flattened vector back to [C, P, P]
+            # 这里的核心逻辑：反归一化
             r_patch_reshaped = recon_patches[i].view_as(target_patches[i])
             r_patch_np = r_patch_reshaped.permute(1, 2, 0).numpy().squeeze()
+            
+            if norm_pix_loss:
+                # 使用目标补丁的局部统计量进行反归一化
+                mean = t_patch_np.mean()
+                std = t_patch_np.std()
+                r_patch_np = r_patch_np * (std + 1e-6) + mean
+            
+            r_patch_np = np.clip(r_patch_np, 0, 1)
             canvas_recon[y1:y2, x1:x2] = cv2.resize(r_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
 
     fig, axes = plt.subplots(1, 4, figsize=(24, 6))

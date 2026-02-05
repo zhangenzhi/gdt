@@ -19,6 +19,8 @@ model:
   fixed_length: 1024
   common_patch_size: 32
   max_depth: 8
+  # 像素归一化开关：开启后模型预测的是标准化后的像素
+  norm_pix_loss: true
 
 training:
   num_epochs: 100
@@ -31,11 +33,9 @@ training:
   eta_min: 1.0e-6
 
 dataset:
-  # 对应原 parser.add_argument 参数
   data_dir: "/work/c30636/dataset/spring8concrete/Resize_8192_output_1"
   num_workers: 8
 
 output:
-  # 对应原 parser.add_argument 参数
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain"
+  save_name: "hmae_s8d_pretrain_denorm"
