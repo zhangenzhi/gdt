@@ -119,25 +119,32 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, 
     
     output_path = os.path.join(config['output']['base_dir'], config['output']['save_name'])
 
+    # Optional: Load checkpoint if resuming
+    resume_path = os.path.join(output_path, "latest_checkpoint.pth")
+    if os.path.exists(resume_path):
+        start_epoch = load_checkpoint(model, optimizer, scheduler, scaler, resume_path, device_id)
+
+    if is_main_process:
+        logging.info(f"Starting HMAE pre-training for {num_epochs} epochs...")
+    
     for epoch in range(start_epoch, num_epochs):
         if is_ddp: train_loader.sampler.set_epoch(epoch)
         model.train()
         running_loss = 0.0
         
         for i, batch in enumerate(train_loader):
-            # 将 DataLoader 已经切分好的数据移动到 GPU
-            # 现在的 batch 直接就是处理好的各个张量
+            # Move batch data to GPU
             batch = {k: v.to(device_id, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
             
             sync_context = model.no_sync() if (is_ddp and (i + 1) % accumulation_steps != 0) else contextlib.nullcontext()
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
-                    # 1. 模型预测
+                    # 1. Model Prediction
                     pred_img, pred_noise = model(
                         batch['patches'], batch['coords'], batch['depths'], batch['mask']
                     )
-                    # 2. 计算损失
+                    # 2. Calculate Loss
                     loss = hmae_engine.train_step_loss(
                         batch['targets'], pred_img, batch['noises'], pred_noise, batch['mask']
                     )
@@ -154,6 +161,7 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, 
             running_loss += loss.item() * accumulation_steps
             
             if (i + 1) % 500 == 0 and is_main_process:
+                # FIXED: Added missing 'config' argument to the call below
                 visualize_hmae_reconstruction(
                     batch, pred_img, loss.item() * accumulation_steps, i + 1,
                     os.path.join(output_path, "images"), config, prefix=f"train_e{epoch + 1}"
@@ -164,7 +172,8 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, 
                 running_loss = 0.0
 
         if is_main_process:
-            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, os.path.join(output_path, "latest_checkpoint.pth"))
+            checkpoint_path = os.path.join(output_path, "latest_checkpoint.pth")
+            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, checkpoint_path)
 
 
 def hmae_s8d_pretrain_ddp(config):
