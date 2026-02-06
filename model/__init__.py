@@ -1,4 +1,4 @@
-from .hvit import hvit_b, hvit_l, hvit_xl
+from model.hvit import hvit_b, hvit_l, hvit_xl
 
 # 模型工厂映射字典
 _model_factory = {
