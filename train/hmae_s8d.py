@@ -18,19 +18,21 @@ import cv2
 # --- Project-specific Imports ---
 sys.path.append("./")
 
-from model.hvit import HMAEVIT as HVIT
+from model import create_model
+from gdt.hmae import HierarchicalMaskedAutoEncoder
 from model.utilz import save_checkpoint, load_checkpoint
 from dataset.s8d_hmae import S8DPretrainDataset
 
 
 def setup_logging(config):
-    """Configures logging using paths from the config file."""
+    """根据配置文件设置日志输出路径。"""
     base_dir = config['output']['base_dir']
     save_name = config['output']['save_name']
     log_dir = os.path.join(base_dir, save_name)
     os.makedirs(log_dir, exist_ok=True)
     
     rank = dist.get_rank() if dist.is_initialized() else 0
+    # 清除旧的 handlers
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
         
@@ -43,19 +45,21 @@ def setup_logging(config):
         ]
     )
 
-def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_dir, config, prefix="train"):
+def visualize_hmae_reconstruction(batch, pred_img, loss, step, output_dir, config, prefix="train"):
     """
-    将补丁重新拼成原图，并进行局部的反归一化处理以保证可视化效果。
+    将 Patches 重新拼成完整图像，并展示 QDT 结构与 MAE 重建效果。
+    实现了针对 S8D 灰度图的局部反归一化。
     """
     img_size = config['model']['img_size']
     norm_pix_loss = config['model'].get('norm_pix_loss', True)
     
-    # 转换为 float32 避免绘图报错
-    target_patches = processed_batch['targets'][0].detach().cpu().float() # [L, C, P, P]
-    coords = processed_batch['coords'][0].detach().cpu().numpy().astype(int)
-    mask = processed_batch['mask_vis'][0].detach().cpu().numpy()
-    recon_patches = pred_img[0].detach().cpu().float() # [L, patch_dim]
+    # 转换数据到 CPU 和 float32 供 Matplotlib 使用
+    target_patches = batch['targets'][0].detach().cpu().float() # [L, C, P, P]
+    coords = batch['coords'][0].detach().cpu().numpy().astype(int) # [L, 4]
+    mask = batch['mask_vis'][0].detach().cpu().numpy()            # [L]
+    recon_patches = pred_img[0].detach().cpu().float()            # [L, patch_dim]
     
+    # 初始化对比画布
     canvas_target = np.zeros((img_size, img_size), dtype=np.float32)
     canvas_input = np.zeros((img_size, img_size), dtype=np.float32)
     canvas_recon = np.zeros((img_size, img_size), dtype=np.float32)
@@ -63,91 +67,80 @@ def visualize_hmae_reconstruction(processed_batch, pred_img, loss, step, output_
 
     L = target_patches.shape[0]
     for i in range(L):
-        m_val = mask[i]
         x1, x2, y1, y2 = coords[i]
         w, h = x2 - x1, y2 - y1
         if w <= 0 or h <= 0: continue
 
-        # 1. 原始补丁 (Target)
+        # 1. 准备 Target 补丁
         t_patch_np = target_patches[i].permute(1, 2, 0).numpy().squeeze()
         resized_t = cv2.resize(t_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
-        canvas_target[y1:y2, x1:x2] = resized_t
         
-        # 2. QDT 网格结构
+        canvas_target[y1:y2, x1:x2] = resized_t
         canvas_qdt[y1:y2, x1:x2] = resized_t
         cv2.rectangle(canvas_qdt, (x1, y1), (x2, y2), (1.0,), 1)
 
-        # 3. 输入补丁 (Input - MAE 风格仅显示可见部分)
-        if m_val == 0:
+        # 2. 准备 Input (仅显示可见部分)
+        if mask[i] == 0:
             canvas_input[y1:y2, x1:x2] = resized_t
         
-        # 4. 重建补丁 (Reconstruction)
-        if m_val == 0:
+        # 3. 准备 Reconstruction
+        if mask[i] == 0:
             canvas_recon[y1:y2, x1:x2] = resized_t
         else:
-            # 这里的核心逻辑：反归一化
             r_patch_reshaped = recon_patches[i].view_as(target_patches[i])
             r_patch_np = r_patch_reshaped.permute(1, 2, 0).numpy().squeeze()
             
             if norm_pix_loss:
-                # 使用目标补丁的局部统计量进行反归一化
-                mean = t_patch_np.mean()
-                std = t_patch_np.std()
+                mean, std = t_patch_np.mean(), t_patch_np.std()
                 r_patch_np = r_patch_np * (std + 1e-6) + mean
             
             r_patch_np = np.clip(r_patch_np, 0, 1)
             canvas_recon[y1:y2, x1:x2] = cv2.resize(r_patch_np, (w, h), interpolation=cv2.INTER_NEAREST)
 
     fig, axes = plt.subplots(1, 4, figsize=(24, 6))
-    axes[0].imshow(canvas_target, cmap='gray', vmin=0, vmax=1)
-    axes[0].set_title("Original (Target)")
+    fig.suptitle(f"Step: {step} | Loss: {loss:.6f}", fontsize=14)
     
-    axes[1].imshow(canvas_qdt, cmap='gray', vmin=0, vmax=1)
-    axes[1].set_title("QDT Structure")
+    titles = ["Original", "QDT Grid", "MAE Input", "MAE Recon"]
+    canvases = [canvas_target, canvas_qdt, canvas_input, canvas_recon]
     
-    axes[2].imshow(canvas_input, cmap='gray', vmin=0, vmax=1)
-    axes[2].set_title("HMAE Input (Visible)")
+    for ax, canvas, title in zip(axes, canvases, titles):
+        ax.imshow(canvas, cmap='gray', vmin=0, vmax=1)
+        ax.set_title(title)
+        ax.axis('off')
     
-    axes[3].imshow(canvas_recon, cmap='gray', vmin=0, vmax=1)
-    axes[3].set_title("Reconstructed")
-    
-    for ax in axes: ax.axis('off')
     plt.tight_layout()
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}_full.png"))
     plt.close(fig)
 
-def pretrain_hmae_model(model, train_loader, optimizer, scheduler, device_id, config, start_epoch=0, is_ddp=False):
+def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, device_id, config, is_ddp=False):
+    """核心训练循环。"""
     scaler = GradScaler(enabled=True)
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
     num_epochs = config['training']['num_epochs']
     is_main_process = not is_ddp or (dist.get_rank() == 0)
-    
     output_path = os.path.join(config['output']['base_dir'], config['output']['save_name'])
 
-    # 如果有 checkpoint 则恢复
+    start_epoch = 0
     resume_path = os.path.join(output_path, "latest_checkpoint.pth")
     if os.path.exists(resume_path):
         start_epoch = load_checkpoint(model, optimizer, scheduler, scaler, resume_path, device_id)
 
     if is_main_process:
-        logging.info(f"Starting HMAE pre-training for {num_epochs} epochs (MAE Style)...")
-    
+        logging.info(f"开始 HMAE 预训练模式：{config['model']['model_type']}")
+
     for epoch in range(start_epoch, num_epochs):
         if is_ddp: train_loader.sampler.set_epoch(epoch)
         model.train()
         running_loss = 0.0
         
         for i, batch in enumerate(train_loader):
-            # 将数据移动到 GPU
             batch = {k: v.to(device_id, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
             
             sync_context = model.no_sync() if (is_ddp and (i + 1) % accumulation_steps != 0) else contextlib.nullcontext()
             
             with sync_context:
                 with autocast(device_type='cuda', dtype=torch.bfloat16):
-                    # 1. 直接前向传播
-                    # 模型内部现在处理了 masking 和 loss 计算
                     loss, pred_img, mask = model(
                         batch['patches'], batch['coords'], batch['depths']
                     )
@@ -164,8 +157,7 @@ def pretrain_hmae_model(model, train_loader, optimizer, scheduler, device_id, co
             running_loss += loss.item() * accumulation_steps
             
             if (i + 1) % 500 == 0 and is_main_process:
-                # 为了可视化，我们将模型生成的 mask 存入 batch
-                batch['mask_vis'] = mask
+                batch['mask_vis'] = mask 
                 visualize_hmae_reconstruction(
                     batch, pred_img, loss.item() * accumulation_steps, i + 1,
                     os.path.join(output_path, "images"), config, prefix=f"train_e{epoch + 1}"
@@ -176,10 +168,10 @@ def pretrain_hmae_model(model, train_loader, optimizer, scheduler, device_id, co
                 running_loss = 0.0
 
         if is_main_process:
-            checkpoint_path = os.path.join(output_path, "latest_checkpoint.pth")
-            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, checkpoint_path)
+            save_checkpoint(model, optimizer, scheduler, scaler, epoch, config, resume_path)
 
 def hmae_s8d_pretrain_ddp(config):
+    """主启动逻辑。"""
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     device = torch.device("cuda", local_rank)
@@ -190,10 +182,14 @@ def hmae_s8d_pretrain_ddp(config):
 
     if local_rank == 0: setup_logging(config)
 
-    # 1. 加载数据
+    # 1. 实例化数据集
     dataset = S8DPretrainDataset(
         root_dir=config['dataset']['data_dir'], 
-        img_size=config['model']['img_size']
+        img_size=config['model']['img_size'],
+        hmae_config={
+            'fixed_length': config['model']['fixed_length'],
+            'patch_size': config['model']['patch_size']
+        }
     )
     sampler = DistributedSampler(dataset) if world_size > 1 else None
     train_loader = DataLoader(
@@ -204,28 +200,39 @@ def hmae_s8d_pretrain_ddp(config):
         pin_memory=True
     )
 
-    # 2. 初始化重构后的模型
-    model = HVIT(
+    # 2. --- 使用工厂函数动态实例化模型 ---
+    model_type = config['model'].get('model_type', 'hvit_b')
+    model = create_model(
+        model_type=model_type,
         img_size=config['model']['img_size'],
         patch_size=config['model']['patch_size'],
         in_channels=config['model'].get('in_channels', 1),
-        encoder_dim=config['model']['encoder_embed_dim'],
-        encoder_depth=config['model']['encoder_depth'],
-        encoder_heads=config['model']['encoder_heads'],
-        decoder_dim=config['model']['decoder_embed_dim'],
-        decoder_depth=config['model']['decoder_depth'],
-        decoder_heads=config['model']['decoder_heads'],
-        mask_ratio=config['model'].get('mask_ratio', 0.75)
+        mask_ratio=config['model'].get('mask_ratio', 0.75),
+        norm_pix_loss=config['model'].get('norm_pix_loss', True)
     ).to(device)
     
     if world_size > 1:
         model = DDP(model, device_ids=[local_rank])
     
-    optimizer = torch.optim.AdamW(model.parameters(), lr=float(config['training']['learning_rate']))
+    # 3. 优化器与调度器
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=float(config['training']['learning_rate']),
+        weight_decay=float(config['training']['weight_decay']),
+        betas=tuple(config['training'].get('betas', [0.9, 0.95]))
+    )
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'] * len(train_loader))
     
-    # 3. 运行训练
-    pretrain_hmae_model(model, train_loader, optimizer, scheduler, device, config, is_ddp=(world_size > 1))
+    # 4. 初始化 Loss 引擎 (仅需参数)
+    hmae_engine = HierarchicalMaskedAutoEncoder(
+        fixed_length=config['model']['fixed_length'],
+        patch_size=config['model']['patch_size']
+    )
+
+    # 5. 开始预训练
+    pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, device, config, is_ddp=(world_size > 1))
+    
+    if world_size > 1: dist.destroy_process_group()
 
 
 if __name__ == "__main__":

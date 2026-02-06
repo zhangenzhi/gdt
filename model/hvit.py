@@ -56,7 +56,6 @@ class HMAEEncoder(nn.Module):
         
         # 4. Prepend cls token
         cls_token = self.cls_token.expand(B, -1, -1)
-        # Note: CLS token doesn't have a specific spatial coordinate, we add it without pos_embed or with a dummy
         x = torch.cat((cls_token, x), dim=1)
         
         # 5. Transformer blocks
@@ -71,7 +70,6 @@ class HMAEDecoder(nn.Module):
     def __init__(self, img_size=1024, patch_size=32, in_channels=1, encoder_dim=768, decoder_dim=512, depth=8, num_heads=16):
         super().__init__()
         self.patch_dim = in_channels * patch_size * patch_size
-        self.num_patches = (img_size // patch_size) ** 2 # Placeholder, actual used is from processor
         
         self.decoder_embed = nn.Linear(encoder_dim, decoder_dim, bias=True)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
@@ -89,7 +87,6 @@ class HMAEDecoder(nn.Module):
         x = self.decoder_embed(x)
 
         # 2. Prepare full sequence tokens
-        # x: [B, n_visible + 1, D] (the +1 is CLS)
         B, N_full = ids_restore.shape[0], ids_restore.shape[1]
         mask_tokens = self.mask_token.repeat(B, N_full - (x.shape[1] - 1), 1)
         
@@ -148,7 +145,6 @@ class HMAEVIT(nn.Module):
         return ids_keep, mask, ids_restore
 
     def forward_loss(self, targets, pred, mask):
-        # targets: [B, N, C, P, P]
         target = targets.flatten(2)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -157,26 +153,39 @@ class HMAEVIT(nn.Module):
 
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)
-        
-        # Only compute loss on masked patches
         loss = (loss * mask).sum() / (mask.sum() + 1e-6)
         return loss
 
     def forward(self, patches, coords, depths):
-        # patches: [B, N, C, P, P]
         B, N, C, PH, PW = patches.shape
         x = patches.flatten(2)
         
-        # 1. Masking
         ids_keep, mask, ids_restore = self.random_masking(B, N, x.device)
-        
-        # 2. Encoding (Visible only)
         enc_out = self.encoder(x, coords, depths, ids_keep)
-        
-        # 3. Decoding (Full sequence)
         pred = self.decoder(enc_out, coords, depths, ids_restore)
-        
-        # 4. Loss
         loss = self.forward_loss(patches, pred, mask)
         
         return loss, pred, mask
+
+# --- 5. Model Definitions (B, L, XL) ---
+
+def hmae_vit_base_patch32(**kwargs):
+    model = HMAEVIT(
+        encoder_dim=768, encoder_depth=12, encoder_heads=12,
+        decoder_dim=512, decoder_depth=8, decoder_heads=16,
+        **kwargs)
+    return model
+
+def hmae_vit_large_patch32(**kwargs):
+    model = HMAEVIT(
+        encoder_dim=1024, encoder_depth=24, encoder_heads=16,
+        decoder_dim=512, decoder_depth=8, decoder_heads=16,
+        **kwargs)
+    return model
+
+def hmae_vit_xlarge_patch32(**kwargs):
+    model = HMAEVIT(
+        encoder_dim=1280, encoder_depth=32, encoder_heads=16,
+        decoder_dim=512, decoder_depth=8, decoder_heads=16,
+        **kwargs)
+    return model

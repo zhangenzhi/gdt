@@ -1,41 +1,37 @@
-# HMAE-ViT-B-S8D 预训练配置
+# HMAE-ViT-B-S8D 预训练配置 (Base 规格)
 
-task_name: "hmae_s8d_pretrain"
+task_name: "hmae_s8d_pretrain_base"
 
 model:
+  # --- 模型规格选择 ---
+  # 可选: hvit_b (Base), hvit_l (Large), hvit_xl (XLarge)
+  model_type: "hvit_b"
+  
+  # 基础几何参数
   img_size: 1024
   patch_size: 32
   in_channels: 1
-  # Encoder (ViT-Base)
-  encoder_embed_dim: 768
-  encoder_depth: 12
-  encoder_heads: 12
-  # Decoder
-  decoder_embed_dim: 512
-  decoder_depth: 8
-  decoder_heads: 16
-  mask_ratio: 0.75
-  # HMAE Specific
-  fixed_length: 8194
-  common_patch_size: 32
-  max_depth: 8
-  # 像素归一化开关：开启后模型预测的是标准化后的像素
-  norm_pix_loss: true
+  
+  # HMAE / MAE 核心参数
+  mask_ratio: 0.25         # MAE 风格通常使用高掩码率 (0.75)
+  fixed_length: 1024       
+  max_depth: 8             
+  norm_pix_loss: true      
 
 training:
   num_epochs: 400
   warmup_epochs: 10
-  batch_size: 8
-  gradient_accumulation_steps: 1
-  learning_rate: 1.5e-4
+  batch_size: 8            # Base 模型显存占用较低，可以增加 Batch Size
+  gradient_accumulation_steps: 1 
+  learning_rate: 1.5e-4    # Base 模型通常使用稍高一点的学习率
   weight_decay: 0.05
   betas: [0.9, 0.95]
   eta_min: 1.0e-6
 
 dataset:
   data_dir: "/work/c30636/dataset/spring8concrete/Resize_8192_output_1"
-  num_workers: 8
+  num_workers: 8           
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-400ep-mr75"
+  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-400ep-mr25"
