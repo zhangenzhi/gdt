@@ -167,25 +167,22 @@ class HMAEVIT(nn.Module):
         
         return loss, pred, mask
 
-# --- 5. Model Definitions (B, L, XL) ---
+# --- 5. 模型定义 (B, L, XL) ---
 
-def hmae_vit_base_patch32(**kwargs):
-    model = HMAEVIT(
+def hvit_b(**kwargs):
+    return HMAEVIT(
         encoder_dim=768, encoder_depth=12, encoder_heads=12,
         decoder_dim=512, decoder_depth=8, decoder_heads=16,
         **kwargs)
-    return model
 
-def hmae_vit_large_patch32(**kwargs):
-    model = HMAEVIT(
+def hvit_l(**kwargs):
+    return HMAEVIT(
         encoder_dim=1024, encoder_depth=24, encoder_heads=16,
         decoder_dim=512, decoder_depth=8, decoder_heads=16,
         **kwargs)
-    return model
 
-def hmae_vit_xlarge_patch32(**kwargs):
-    model = HMAEVIT(
+def hvit_xl(**kwargs):
+    return HMAEVIT(
         encoder_dim=1280, encoder_depth=32, encoder_heads=16,
         decoder_dim=512, decoder_depth=8, decoder_heads=16,
         **kwargs)
-    return model
