@@ -5,7 +5,7 @@ task_name: "hmae_s8d_pretrain_base"
 model:
   # --- 模型规格选择 ---
   # 可选: hvit_b (Base), hvit_l (Large), hvit_xl (XLarge)
-  model_type: "hvit_b"
+  model_type: "hvit_l"
   
   # 基础几何参数
   img_size: 1024
@@ -13,13 +13,13 @@ model:
   in_channels: 1
   
   # HMAE / MAE 核心参数
-  mask_ratio: 0.25         # MAE 风格通常使用高掩码率 (0.75)
+  mask_ratio: 0.5         # MAE 风格通常使用高掩码率 (0.75)
   fixed_length: 1024       
   max_depth: 8             
   norm_pix_loss: true      
 
 training:
-  num_epochs: 400
+  num_epochs: 100
   warmup_epochs: 10
   batch_size: 8            # Base 模型显存占用较低，可以增加 Batch Size
   gradient_accumulation_steps: 1 
@@ -34,4 +34,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-400ep-mr25"
+  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-100ep-hvit_l"
