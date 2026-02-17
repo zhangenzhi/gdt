@@ -14,14 +14,14 @@ model:
   
   # HMAE / MAE 核心参数
   mask_ratio: 0.5         # MAE 风格通常使用高掩码率 (0.75)
-  fixed_length: 8194      # 固定长度序列 (8194%3=1)       
+  fixed_length: 1024      # 固定长度序列 (8194%3=1)       
   max_depth: 8             
   norm_pix_loss: true      
 
 training:
   num_epochs: 400
   warmup_epochs: 10
-  batch_size: 2            # Base 模型显存占用较低，可以增加 Batch Size
+  batch_size: 8            # Base 模型显存占用较低，可以增加 Batch Size
   gradient_accumulation_steps: 1 
   learning_rate: 1.5e-4    # Base 模型通常使用稍高一点的学习率
   weight_decay: 0.05
@@ -34,4 +34,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq8k-bs2-lr1.5e-4-400ep-rope"
+  save_name: "hmae_s8d_pretrain_denorm-seq1k-bs8-lr1.5e-4-400ep-rope"
