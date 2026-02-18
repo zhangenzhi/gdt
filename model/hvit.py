@@ -177,18 +177,41 @@ class HMAEEncoder(nn.Module):
         # 1. Patch 内容嵌入
         x = self.patch_embed(x)
         
-        # 2. 注入非位置结构信息 (w, h, depth)
+        # # 2. 注入非位置结构信息 (w, h, depth)
+        # w = (coords[..., 1] - coords[..., 0]) / self.img_size
+        # h = (coords[..., 3] - coords[..., 2]) / self.img_size
+        # s_feat = torch.stack([w, h, depths / 8.0], dim=-1)
+        # x = x + self.struct_embed(s_feat)
+
+        # # 3. 准备 RoPE
+        # cx = (coords[..., 0] + coords[..., 1]) / (2.0 * self.img_size)
+        # cy = (coords[..., 2] + coords[..., 3]) / (2.0 * self.img_size)
+        # c_feat = torch.stack([cx, cy], dim=-1)
+        # cos, sin = self.rope(c_feat)
+
+        # --- 1. 结构嵌入 (struct_embed) ---
+        # 这里的 w, h, depth 保持归一化是没问题的，因为它们进的是 MLP (Linear)
         w = (coords[..., 1] - coords[..., 0]) / self.img_size
         h = (coords[..., 3] - coords[..., 2]) / self.img_size
         s_feat = torch.stack([w, h, depths / 8.0], dim=-1)
         x = x + self.struct_embed(s_feat)
 
-        # 3. 准备 RoPE
-        cx = (coords[..., 0] + coords[..., 1]) / (2.0 * self.img_size)
-        cy = (coords[..., 2] + coords[..., 3]) / (2.0 * self.img_size)
+        # --- 2. RoPE 准备 (关键修改！！！) ---
+        # 错误写法 (导致收敛慢): 
+        # cx = (coords[..., 0] + coords[..., 1]) / (2.0 * self.img_size)
+        
+        # 正确写法: 使用绝对像素坐标，或者是相对 Patch Size 的坐标
+        # 例如: 如果 img_size=1024，cx 范围就是 0~1024
+        # 这样配合 theta=10000，才能产生足够显著的旋转差异
+        cx = (coords[..., 0] + coords[..., 1]) / 2.0 
+        cy = (coords[..., 2] + coords[..., 3]) / 2.0
+        
+        # 此时 cx, cy 是 float32，范围 [0, 1024]
         c_feat = torch.stack([cx, cy], dim=-1)
+        
+        # 生成 RoPE
         cos, sin = self.rope(c_feat)
-
+        
         # 4. Gather 选中的补丁及其对应的 RoPE
         # x: [B, len_keep, D]
         x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
