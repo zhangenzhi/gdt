@@ -78,37 +78,47 @@ class HMAERotaryEmbedding(nn.Module):
         sin = emb.sin().unsqueeze(1) # [B, 1, N, head_dim]
         return cos, sin
 
-# --- 2. 适配 RoPE 的自定义 Attention 与 Block ---
-
+# --- 2. 适配 PyTorch 原生 SDPA (FlashAttention) ---
 
 class HMAEAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=True, attn_drop=0., proj_drop=0.):
         super().__init__()
         self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop_prob = attn_drop # 供 SDPA 使用
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, rope_cos=None, rope_sin=None):
         B, N, C = x.shape
-        # [3, B, num_heads, N, head_dim]
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        
+        # 1. 生成 QKV
+        # 变换为 PyTorch 标准形状: [B, H, N, D]
+        # reshape: [B, N, 3, H, D] -> permute: [3, B, H, N, D]
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        
+        q, k, v = qkv[0], qkv[1], qkv[2] # [B, H, N, D]
 
-        # 应用 RoPE (仅对 Q 和 K，不对 V)
+        # 2. 应用 RoPE
+        # rope_cos/sin 形状为 [B, 1, N, D]，自动广播到 H 维度
         if rope_cos is not None and rope_sin is not None:
-            # 这里的 cos/sin 形状应该是 [B, 1, N, head_dim]
             q, k = apply_rotary_pos_emb(q, k, rope_cos, rope_sin)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        # 3. 使用 PyTorch 原生 FlashAttention (SDPA)
+        # 自动选择 FlashAttention V2 或 Memory Efficient Attention
+        x = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.attn_drop_prob if self.training else 0.0,
+            scale=self.scale
+        )
+        
+        # 4. 重塑回 [B, N, C]
+        # [B, H, N, D] -> [B, N, H, D] -> [B, N, C]
+        x = x.transpose(1, 2).reshape(B, N, C)
+        
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
