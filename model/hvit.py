@@ -48,7 +48,7 @@ class HMAERotaryEmbedding(nn.Module):
     针对 2D 连续坐标的旋转位置编码。
     将 head_dim 分成两部分，分别对应 x 和 y 的旋转。
     """
-    def __init__(self, head_dim, theta=10000.0):
+    def __init__(self, head_dim, theta=100000.0):
         super().__init__()
         self.head_dim = head_dim
         # 预计算频率标量
