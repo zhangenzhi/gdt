@@ -23,7 +23,7 @@ training:
   warmup_epochs: 10
   batch_size: 8            # Base 模型显存占用较低，可以增加 Batch Size
   gradient_accumulation_steps: 1 
-  learning_rate: 1.5e-4    # Base 模型通常使用稍高一点的学习率
+  learning_rate: 1e-4    # Base 模型通常使用稍高一点的学习率
   weight_decay: 0.05
   betas: [0.9, 0.95]
   eta_min: 1.0e-6
@@ -34,4 +34,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq8k-bs8-lr1.5e-4-400ep-rope3"
+  save_name: "hmae_s8d_pretrain_denorm-seq8k-bs8-lr1e-4-400ep-rope3"
