@@ -21,7 +21,7 @@ model:
 training:
   num_epochs: 400
   warmup_epochs: 10
-  batch_size: 8            # Base 模型显存占用较低，可以增加 Batch Size
+  batch_size: 16            # Base 模型显存占用较低，可以增加 Batch Size
   gradient_accumulation_steps: 1 
   learning_rate: 1e-4    # Base 模型通常使用稍高一点的学习率
   weight_decay: 0.05
