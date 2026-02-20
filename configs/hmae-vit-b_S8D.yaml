@@ -8,7 +8,7 @@ model:
   model_type: "hvit_b"
   
   # 基础几何参数
-  img_size: 4096
+  img_size: 1024
   patch_size: 32
   in_channels: 1
   
@@ -34,4 +34,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d-4k_pretrain_denorm-seq8k-pz8-bs16-lr1e-4-400ep-rope3"
+  save_name: "hmae_s8d-4k_pretrain_denorm-seq8k-pz32-bs16-lr1e-4-400ep-rope4"
