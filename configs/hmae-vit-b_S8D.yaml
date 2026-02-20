@@ -9,7 +9,7 @@ model:
   
   # 基础几何参数
   img_size: 4096
-  patch_size: 8
+  patch_size: 32
   in_channels: 1
   
   # HMAE / MAE 核心参数
