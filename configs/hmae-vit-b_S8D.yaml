@@ -34,4 +34,4 @@ dataset:
 
 output:
   base_dir: "./output"
-  save_name: "hmae_s8d_pretrain_denorm-seq8k-pz8-bs8-lr1e-4-400ep-rope3"
+  save_name: "hmae_s8d_pretrain_denorm-seq8k-pz8-bs16-lr1e-4-400ep-rope3"
