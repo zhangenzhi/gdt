@@ -37,3 +37,7 @@ training:
   use_fp8: False
   use_postrain: False
   gradient_accumulation_steps: 1
+
+dataset:
+  data_dir: "/work/c30636/dataset/imagenet/"
+  num_workers: 8        
