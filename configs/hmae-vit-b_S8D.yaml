@@ -19,6 +19,8 @@ model:
   norm_pix_loss: true      
 
 training:
+  compile: true
+  use_bf16: true
   num_epochs: 400
   warmup_epochs: 10
   batch_size: 16            # Base 模型显存占用较低，可以增加 Batch Size

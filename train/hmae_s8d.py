@@ -113,7 +113,7 @@ def visualize_hmae_reconstruction(batch, pred_img, loss, step, output_dir, confi
     plt.savefig(os.path.join(output_dir, f"{prefix}_{step}_full.png"))
     plt.close(fig)
 
-def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, device_id, config, is_ddp=False):
+def pretrain_hmae_model(model, train_loader, optimizer, scheduler, device_id, config, is_ddp=False):
     """核心训练循环。"""
     scaler = GradScaler(enabled=True)
     accumulation_steps = config['training'].get('gradient_accumulation_steps', 1)
@@ -210,6 +210,14 @@ def hmae_s8d_pretrain_ddp(config):
         mask_ratio=config['model'].get('mask_ratio', 0.75),
         norm_pix_loss=config['model'].get('norm_pix_loss', True)
     ).to(device)
+        
+    # --- 性能优化：启动 torch.compile (需在 DDP 之前) ---
+    use_compile = config['training'].get('compile', True)
+    if use_compile and int(torch.__version__.split('.')[0]) >= 2:
+        if local_rank == 0:
+            logging.info("Optimizing model with torch.compile()...")
+        # 可以尝试 mode="reduce-overhead" 或 mode="max-autotune" 以获取极限性能
+        model = torch.compile(model)
     
     if world_size > 1:
         model = DDP(model, device_ids=[local_rank])
@@ -222,15 +230,9 @@ def hmae_s8d_pretrain_ddp(config):
         betas=tuple(config['training'].get('betas', [0.9, 0.95]))
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=config['training']['num_epochs'] * len(train_loader))
-    
-    # 4. 初始化 Loss 引擎 (仅需参数)
-    hmae_engine = HierarchicalMaskedAutoEncoder(
-        fixed_length=config['model']['fixed_length'],
-        patch_size=config['model']['patch_size']
-    )
 
     # 5. 开始预训练
-    pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, device, config, is_ddp=(world_size > 1))
+    pretrain_hmae_model(model, train_loader, optimizer, scheduler, device, config, is_ddp=(world_size > 1))
     
     if world_size > 1: dist.destroy_process_group()
 
