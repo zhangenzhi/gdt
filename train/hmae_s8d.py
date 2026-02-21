@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 from torch.amp import GradScaler, autocast 
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, DistributedSampler
 from matplotlib import pyplot as plt
 import numpy as np
@@ -156,11 +156,11 @@ def pretrain_hmae_model(model, hmae_engine, train_loader, optimizer, scheduler, 
             
             running_loss += loss.item() * accumulation_steps
             
-            if (i + 1) % 500 == 0 and is_main_process:
+            if (i + 1) % 200 == 0 and is_main_process:
                 batch['mask_vis'] = mask 
                 visualize_hmae_reconstruction(
                     batch, pred_img, loss.item() * accumulation_steps, i + 1,
-                    os.path.join(output_path, "images"), config, prefix=f"train_e{epoch + 1}"
+                    os.path.join(output_path, "images"), config, prefix=f"train_e{epoch + 1}_b{i + 1}"
                 )
 
             if (i + 1) % 10 == 0 and is_main_process:
